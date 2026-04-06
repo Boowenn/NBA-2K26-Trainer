@@ -303,118 +303,129 @@ def kill_game_process() -> bool:
         return False
 
 
-def stop_eac_service() -> tuple[bool, str]:
-    """Stop EasyAntiCheat service and kill EAC processes.
+def _get_game_dir_from_exe(exe_path: str) -> str:
+    return os.path.dirname(exe_path)
+
+
+# EAC files that need to be disabled (relative to game directory)
+_EAC_FILES_TO_DISABLE = [
+    r"data\epic_online_service\eossdk-win64-shipping.dll",
+    r"EasyAntiCheat\EasyAntiCheat_EOS_Setup.exe",
+    r"start_protected_game.exe",
+]
+
+_BACKUP_SUFFIX = ".disabled_by_trainer"
+
+
+def disable_eac_files(game_dir: str) -> tuple[bool, list[str]]:
+    """Rename EAC-related files so the game can't load them.
 
     Returns:
-        (success, message)
+        (any_renamed, list of status messages)
     """
-    stopped = []
-    errors = []
+    messages = []
+    any_renamed = False
+    for rel_path in _EAC_FILES_TO_DISABLE:
+        src = os.path.join(game_dir, rel_path)
+        dst = src + _BACKUP_SUFFIX
+        if os.path.exists(dst):
+            messages.append(f"Already disabled: {rel_path}")
+            any_renamed = True
+            continue
+        if os.path.exists(src):
+            try:
+                os.rename(src, dst)
+                messages.append(f"Disabled: {rel_path}")
+                any_renamed = True
+            except PermissionError:
+                messages.append(f"FAILED (access denied): {rel_path}")
+            except Exception as e:
+                messages.append(f"FAILED ({e}): {rel_path}")
+        else:
+            messages.append(f"Not found (skip): {rel_path}")
+    return any_renamed, messages
 
-    # 1. Kill EAC processes
-    eac_processes = [
-        "EasyAntiCheat.exe",
-        "EasyAntiCheat_EOS.exe",
-        "EasyAntiCheat_Setup.exe",
-        "start_protected_game.exe",
-    ]
-    for proc_name in eac_processes:
+
+def restore_eac_files(game_dir: str) -> list[str]:
+    """Restore EAC files that were disabled by the trainer."""
+    messages = []
+    for rel_path in _EAC_FILES_TO_DISABLE:
+        src = os.path.join(game_dir, rel_path) + _BACKUP_SUFFIX
+        dst = os.path.join(game_dir, rel_path)
+        if os.path.exists(src):
+            try:
+                os.rename(src, dst)
+                messages.append(f"Restored: {rel_path}")
+            except Exception as e:
+                messages.append(f"Restore failed ({e}): {rel_path}")
+    return messages
+
+
+def stop_eac_service() -> list[str]:
+    """Stop EAC services and kill EAC processes."""
+    messages = []
+
+    # Kill EAC processes
+    for proc_name in ["EasyAntiCheat.exe", "EasyAntiCheat_EOS.exe",
+                       "EasyAntiCheat_Setup.exe", "start_protected_game.exe"]:
         try:
-            result = subprocess.run(
-                ["taskkill", "/F", "/IM", proc_name],
-                capture_output=True, timeout=10
-            )
-            if result.returncode == 0:
-                stopped.append(f"Killed {proc_name}")
+            r = subprocess.run(["taskkill", "/F", "/IM", proc_name],
+                               capture_output=True, timeout=10)
+            if r.returncode == 0:
+                messages.append(f"Killed {proc_name}")
         except Exception:
             pass
 
-    # 2. Stop EAC Windows services
-    eac_services = [
-        "EasyAntiCheat",
-        "EasyAntiCheat_EOS",
-        "EasyAntiCheatSys",
-    ]
-    for svc in eac_services:
+    # Stop EAC services
+    for svc in ["EasyAntiCheat", "EasyAntiCheat_EOS", "EasyAntiCheatSys"]:
         try:
-            result = subprocess.run(
-                ["sc", "stop", svc],
-                capture_output=True, timeout=10
-            )
-            if result.returncode == 0:
-                stopped.append(f"Stopped service {svc}")
+            r = subprocess.run(["sc", "stop", svc], capture_output=True, timeout=10)
+            if r.returncode == 0:
+                messages.append(f"Stopped service {svc}")
         except Exception:
             pass
-
-    # 3. Disable EAC services so they don't auto-restart
-    for svc in eac_services:
-        try:
-            subprocess.run(
-                ["sc", "config", svc, "start=", "disabled"],
-                capture_output=True, timeout=10
-            )
-        except Exception:
-            pass
-
-    import time
-    time.sleep(2)  # Wait for services to fully stop
-
-    # 4. Verify EAC is gone
-    if is_eac_running():
-        return False, "EAC processes still running after stop attempt"
-
-    msg = "; ".join(stopped) if stopped else "No EAC services/processes were running"
-    return True, msg
-
-
-def restore_eac_service():
-    """Re-enable EAC services (call when done editing)"""
-    eac_services = ["EasyAntiCheat", "EasyAntiCheat_EOS", "EasyAntiCheatSys"]
-    for svc in eac_services:
-        try:
-            subprocess.run(
-                ["sc", "config", svc, "start=", "demand"],
-                capture_output=True, timeout=10
-            )
-        except Exception:
-            pass
+    return messages
 
 
 def launch_game_without_eac() -> tuple[bool, str]:
-    """Full procedure: kill game, stop EAC, relaunch game directly.
+    """Full procedure: kill game, stop EAC services, disable EAC files, relaunch.
 
     Returns:
         (success, message)
     """
-    messages = []
+    import time
+    steps = []
 
     # Step 1: Kill existing game
     pid = find_game_pid()
     if pid:
         kill_game_process()
-        messages.append("Killed existing NBA2K26.exe")
-        import time
+        steps.append("1. Killed existing game")
         time.sleep(2)
 
-    # Step 2: Stop EAC
-    eac_ok, eac_msg = stop_eac_service()
-    messages.append(f"EAC: {eac_msg}")
-    if not eac_ok:
-        return False, " | ".join(messages) + " | WARNING: EAC may still be active"
-
-    # Step 3: Find game exe
+    # Step 2: Find game exe first (need game dir for file operations)
     exe = _find_game_exe()
     if not exe:
-        return False, " | ".join(messages) + " | Cannot find NBA2K26.exe"
+        return False, "Cannot find NBA2K26.exe"
+    game_dir = _get_game_dir_from_exe(exe)
 
-    # Step 4: Launch directly
+    # Step 3: Stop EAC services
+    svc_msgs = stop_eac_service()
+    if svc_msgs:
+        steps.append(f"2. {'; '.join(svc_msgs)}")
+    time.sleep(1)
+
+    # Step 4: Disable EAC files (the critical step!)
+    disabled, file_msgs = disable_eac_files(game_dir)
+    steps.append(f"3. Files: {'; '.join(file_msgs)}")
+
+    # Step 5: Launch game
     try:
-        subprocess.Popen([exe], cwd=os.path.dirname(exe))
-        messages.append(f"Launched {exe}")
-        return True, " | ".join(messages)
+        subprocess.Popen([exe], cwd=game_dir)
+        steps.append(f"4. Launched {os.path.basename(exe)}")
+        return True, "\n".join(steps)
     except Exception as e:
-        return False, " | ".join(messages) + f" | Launch failed: {e}"
+        return False, "\n".join(steps) + f"\nLaunch failed: {e}"
 
 
 def _find_game_exe() -> Optional[str]:
