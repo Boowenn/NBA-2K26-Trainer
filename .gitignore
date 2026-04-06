@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.spec.bak
+.venv/
+venv/
+*.exe
+!NBA2K26Trainer.spec
+.idea/
+.vscode/
+*.log

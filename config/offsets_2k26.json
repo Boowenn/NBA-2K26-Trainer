@@ -1,0 +1,129 @@
+{
+  "version": "1.0.0",
+  "game_version": "NBA 2K26",
+  "description": "球员属性内存偏移配置 - 需要根据实际游戏版本校准",
+  "note": "以下 offset 为示例值，实际值需通过 Cheat Engine 或参考 discobisco/2k26-Editor 项目确定",
+
+  "player_table": {
+    "signature": "48 8B 05 ?? ?? ?? ?? 48 8B 48 08",
+    "pointer_offsets": [],
+    "stride": 712,
+    "count_offset": 0,
+    "max_players": 600,
+    "first_name_offset": 0,
+    "last_name_offset": 32,
+    "team_id_offset": 72
+  },
+
+  "attributes": {
+    "基本信息": [
+      {"name": "综合评分", "offset": 76, "type": "uint8", "min": 40, "max": 99, "description": "Overall Rating"},
+      {"name": "年龄", "offset": 80, "type": "uint8", "min": 18, "max": 50, "description": "Age"},
+      {"name": "位置", "offset": 81, "type": "uint8", "min": 0, "max": 4, "description": "Position (0=PG,1=SG,2=SF,3=PF,4=C)"},
+      {"name": "球衣号码", "offset": 82, "type": "uint8", "min": 0, "max": 99, "description": "Jersey Number"},
+      {"name": "身高(cm)", "offset": 84, "type": "uint8", "min": 160, "max": 230, "description": "Height in cm"},
+      {"name": "体重(kg)", "offset": 86, "type": "uint16", "min": 60, "max": 180, "description": "Weight in kg"},
+      {"name": "臂展(cm)", "offset": 88, "type": "uint8", "min": 170, "max": 250, "description": "Wingspan in cm"}
+    ],
+
+    "进攻能力": [
+      {"name": "近距离投篮", "offset": 100, "type": "uint8", "min": 25, "max": 99, "description": "Close Shot"},
+      {"name": "中距离投篮", "offset": 101, "type": "uint8", "min": 25, "max": 99, "description": "Mid-Range Shot"},
+      {"name": "三分球", "offset": 102, "type": "uint8", "min": 25, "max": 99, "description": "Three-Point Shot"},
+      {"name": "罚球", "offset": 103, "type": "uint8", "min": 25, "max": 99, "description": "Free Throw"},
+      {"name": "控球", "offset": 104, "type": "uint8", "min": 25, "max": 99, "description": "Ball Handle"},
+      {"name": "传球准确性", "offset": 105, "type": "uint8", "min": 25, "max": 99, "description": "Pass Accuracy"},
+      {"name": "传球视野", "offset": 106, "type": "uint8", "min": 25, "max": 99, "description": "Pass Vision"},
+      {"name": "传球智商", "offset": 107, "type": "uint8", "min": 25, "max": 99, "description": "Pass IQ"},
+      {"name": "背身单打", "offset": 108, "type": "uint8", "min": 25, "max": 99, "description": "Post Control"},
+      {"name": "上篮", "offset": 109, "type": "uint8", "min": 25, "max": 99, "description": "Driving Layup"},
+      {"name": "扣篮", "offset": 110, "type": "uint8", "min": 25, "max": 99, "description": "Driving Dunk"},
+      {"name": "原地扣篮", "offset": 111, "type": "uint8", "min": 25, "max": 99, "description": "Standing Dunk"},
+      {"name": "背身勾手", "offset": 112, "type": "uint8", "min": 25, "max": 99, "description": "Post Hook"},
+      {"name": "背身压低", "offset": 113, "type": "uint8", "min": 25, "max": 99, "description": "Post Fade"},
+      {"name": "手感", "offset": 114, "type": "uint8", "min": 25, "max": 99, "description": "Shot Close"}
+    ],
+
+    "防守能力": [
+      {"name": "内线防守", "offset": 120, "type": "uint8", "min": 25, "max": 99, "description": "Interior Defense"},
+      {"name": "外线防守", "offset": 121, "type": "uint8", "min": 25, "max": 99, "description": "Perimeter Defense"},
+      {"name": "抢断", "offset": 122, "type": "uint8", "min": 25, "max": 99, "description": "Steal"},
+      {"name": "盖帽", "offset": 123, "type": "uint8", "min": 25, "max": 99, "description": "Block"},
+      {"name": "进攻篮板", "offset": 124, "type": "uint8", "min": 25, "max": 99, "description": "Offensive Rebound"},
+      {"name": "防守篮板", "offset": 125, "type": "uint8", "min": 25, "max": 99, "description": "Defensive Rebound"},
+      {"name": "横向灵活性", "offset": 126, "type": "uint8", "min": 25, "max": 99, "description": "Lateral Quickness"},
+      {"name": "协防意识", "offset": 127, "type": "uint8", "min": 25, "max": 99, "description": "Help Defense IQ"},
+      {"name": "对位防守", "offset": 128, "type": "uint8", "min": 25, "max": 99, "description": "On-Ball Defense"}
+    ],
+
+    "体能属性": [
+      {"name": "速度", "offset": 140, "type": "uint8", "min": 25, "max": 99, "description": "Speed"},
+      {"name": "加速", "offset": 141, "type": "uint8", "min": 25, "max": 99, "description": "Acceleration"},
+      {"name": "力量", "offset": 142, "type": "uint8", "min": 25, "max": 99, "description": "Strength"},
+      {"name": "弹跳", "offset": 143, "type": "uint8", "min": 25, "max": 99, "description": "Vertical"},
+      {"name": "耐力", "offset": 144, "type": "uint8", "min": 25, "max": 99, "description": "Stamina"},
+      {"name": "敏捷", "offset": 145, "type": "uint8", "min": 25, "max": 99, "description": "Hustle"},
+      {"name": "持球速度", "offset": 146, "type": "uint8", "min": 25, "max": 99, "description": "Speed with Ball"}
+    ],
+
+    "篮球智商": [
+      {"name": "进攻意识", "offset": 160, "type": "uint8", "min": 25, "max": 99, "description": "Offensive Consistency"},
+      {"name": "防守意识", "offset": 161, "type": "uint8", "min": 25, "max": 99, "description": "Defensive Consistency"},
+      {"name": "反应速度", "offset": 162, "type": "uint8", "min": 25, "max": 99, "description": "Reaction Time"},
+      {"name": "抗压能力", "offset": 163, "type": "uint8", "min": 25, "max": 99, "description": "Intangibles"}
+    ],
+
+    "潜力与成长": [
+      {"name": "潜力", "offset": 170, "type": "uint8", "min": 25, "max": 99, "description": "Potential"},
+      {"name": "巅峰开始", "offset": 171, "type": "uint8", "min": 20, "max": 40, "description": "Prime Start Age"},
+      {"name": "巅峰结束", "offset": 172, "type": "uint8", "min": 25, "max": 45, "description": "Prime End Age"},
+      {"name": "发展特质", "offset": 173, "type": "uint8", "min": 0, "max": 3, "description": "Development Trait (0=Normal,1=Star,2=Superstar,3=Gem)"}
+    ],
+
+    "合同": [
+      {"name": "年薪(万)", "offset": 180, "type": "uint32", "min": 0, "max": 500000, "description": "Salary in 10K"},
+      {"name": "合同年限", "offset": 184, "type": "uint8", "min": 0, "max": 6, "description": "Contract Years"},
+      {"name": "合同年份", "offset": 185, "type": "uint8", "min": 0, "max": 6, "description": "Current Contract Year"},
+      {"name": "合同类型", "offset": 186, "type": "uint8", "min": 0, "max": 10, "description": "Contract Type"}
+    ],
+
+    "徽章": [
+      {"name": "突破大师", "offset": 200, "type": "uint8", "min": 0, "max": 4, "description": "Ankle Breaker (0=None,1=Bronze,2=Silver,3=Gold,4=HOF)"},
+      {"name": "急停跳投", "offset": 201, "type": "uint8", "min": 0, "max": 4, "description": "Deadeye"},
+      {"name": "空间创造者", "offset": 202, "type": "uint8", "min": 0, "max": 4, "description": "Space Creator"},
+      {"name": "接球就投", "offset": 203, "type": "uint8", "min": 0, "max": 4, "description": "Catch & Shoot"},
+      {"name": "追身大帽", "offset": 204, "type": "uint8", "min": 0, "max": 4, "description": "Chase Down Artist"},
+      {"name": "小钩子", "offset": 205, "type": "uint8", "min": 0, "max": 4, "description": "Hook Specialist"},
+      {"name": "铁壁防守", "offset": 206, "type": "uint8", "min": 0, "max": 4, "description": "Clamps"},
+      {"name": "篮板机器", "offset": 207, "type": "uint8", "min": 0, "max": 4, "description": "Rebound Chaser"},
+      {"name": "挡拆大师", "offset": 208, "type": "uint8", "min": 0, "max": 4, "description": "Pick & Roll Maestro"},
+      {"name": "关键先生", "offset": 209, "type": "uint8", "min": 0, "max": 4, "description": "Clutch Shooter"}
+    ],
+
+    "热区": [
+      {"name": "左底角三分", "offset": 220, "type": "uint8", "min": 0, "max": 3, "description": "Left Corner 3 (0=Cold,1=Neutral,2=Hot,3=Lethal)"},
+      {"name": "右底角三分", "offset": 221, "type": "uint8", "min": 0, "max": 3, "description": "Right Corner 3"},
+      {"name": "左侧45度三分", "offset": 222, "type": "uint8", "min": 0, "max": 3, "description": "Left Wing 3"},
+      {"name": "右侧45度三分", "offset": 223, "type": "uint8", "min": 0, "max": 3, "description": "Right Wing 3"},
+      {"name": "弧顶三分", "offset": 224, "type": "uint8", "min": 0, "max": 3, "description": "Top of Key 3"},
+      {"name": "左侧中距离", "offset": 225, "type": "uint8", "min": 0, "max": 3, "description": "Left Mid-Range"},
+      {"name": "右侧中距离", "offset": 226, "type": "uint8", "min": 0, "max": 3, "description": "Right Mid-Range"},
+      {"name": "罚球线中距离", "offset": 227, "type": "uint8", "min": 0, "max": 3, "description": "Free Throw Line Mid"},
+      {"name": "油漆区", "offset": 228, "type": "uint8", "min": 0, "max": 3, "description": "Paint"},
+      {"name": "篮下", "offset": 229, "type": "uint8", "min": 0, "max": 3, "description": "Under Basket"}
+    ],
+
+    "倾向": [
+      {"name": "三分出手倾向", "offset": 300, "type": "uint8", "min": 0, "max": 100, "description": "Three Point Tendency"},
+      {"name": "中距离出手倾向", "offset": 301, "type": "uint8", "min": 0, "max": 100, "description": "Mid-Range Tendency"},
+      {"name": "篮下进攻倾向", "offset": 302, "type": "uint8", "min": 0, "max": 100, "description": "Inside Tendency"},
+      {"name": "扣篮倾向", "offset": 303, "type": "uint8", "min": 0, "max": 100, "description": "Dunk Tendency"},
+      {"name": "挡拆倾向", "offset": 304, "type": "uint8", "min": 0, "max": 100, "description": "Pick & Roll Tendency"},
+      {"name": "抢断倾向", "offset": 305, "type": "uint8", "min": 0, "max": 100, "description": "Steal Tendency"},
+      {"name": "盖帽倾向", "offset": 306, "type": "uint8", "min": 0, "max": 100, "description": "Block Tendency"},
+      {"name": "传球倾向", "offset": 307, "type": "uint8", "min": 0, "max": 100, "description": "Pass Tendency"},
+      {"name": "背身倾向", "offset": 308, "type": "uint8", "min": 0, "max": 100, "description": "Post Up Tendency"},
+      {"name": "快攻倾向", "offset": 309, "type": "uint8", "min": 0, "max": 100, "description": "Fastbreak Tendency"}
+    ]
+  }
+}
