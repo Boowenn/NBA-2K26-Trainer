@@ -110,7 +110,17 @@ def load_offsets(filepath: str) -> OffsetConfig:
 
 
 def get_default_offsets_path() -> str:
-    """获取默认 offset 配置文件路径"""
+    """获取默认 offset 配置文件路径（兼容 PyInstaller 打包和源码运行）"""
+    import sys
+    # PyInstaller 打包后，_MEIPASS 指向临时解压目录
+    if getattr(sys, '_MEIPASS', None):
+        return os.path.join(sys._MEIPASS, "config", "offsets_2k26.json")
+    # 源码运行：从 exe 同级目录找
+    exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    candidate = os.path.join(exe_dir, "config", "offsets_2k26.json")
+    if os.path.exists(candidate):
+        return candidate
+    # 从包结构向上找
     base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(base, "config", "offsets_2k26.json")
 
