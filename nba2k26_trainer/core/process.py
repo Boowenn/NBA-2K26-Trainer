@@ -291,26 +291,160 @@ def get_game_exe_path() -> Optional[str]:
     return None
 
 
-def launch_game_without_eac() -> bool:
-    """Launch NBA2K26.exe directly (bypassing EAC) for offline mode"""
-    exe = get_game_exe_path()
-    if exe and os.path.exists(exe):
+def kill_game_process() -> bool:
+    """Kill any running NBA2K26.exe process"""
+    try:
+        result = subprocess.run(
+            ["taskkill", "/F", "/IM", "NBA2K26.exe"],
+            capture_output=True, timeout=10
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def stop_eac_service() -> tuple[bool, str]:
+    """Stop EasyAntiCheat service and kill EAC processes.
+
+    Returns:
+        (success, message)
+    """
+    stopped = []
+    errors = []
+
+    # 1. Kill EAC processes
+    eac_processes = [
+        "EasyAntiCheat.exe",
+        "EasyAntiCheat_EOS.exe",
+        "EasyAntiCheat_Setup.exe",
+        "start_protected_game.exe",
+    ]
+    for proc_name in eac_processes:
         try:
-            subprocess.Popen([exe], cwd=os.path.dirname(exe))
-            return True
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", proc_name],
+                capture_output=True, timeout=10
+            )
+            if result.returncode == 0:
+                stopped.append(f"Killed {proc_name}")
         except Exception:
             pass
 
-    # If game not running, search for it
-    script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    candidate = os.path.join(script_dir, "NBA2K26.exe")
-    if os.path.exists(candidate):
+    # 2. Stop EAC Windows services
+    eac_services = [
+        "EasyAntiCheat",
+        "EasyAntiCheat_EOS",
+        "EasyAntiCheatSys",
+    ]
+    for svc in eac_services:
         try:
-            subprocess.Popen([candidate], cwd=os.path.dirname(candidate))
-            return True
+            result = subprocess.run(
+                ["sc", "stop", svc],
+                capture_output=True, timeout=10
+            )
+            if result.returncode == 0:
+                stopped.append(f"Stopped service {svc}")
         except Exception:
             pass
-    return False
+
+    # 3. Disable EAC services so they don't auto-restart
+    for svc in eac_services:
+        try:
+            subprocess.run(
+                ["sc", "config", svc, "start=", "disabled"],
+                capture_output=True, timeout=10
+            )
+        except Exception:
+            pass
+
+    import time
+    time.sleep(2)  # Wait for services to fully stop
+
+    # 4. Verify EAC is gone
+    if is_eac_running():
+        return False, "EAC processes still running after stop attempt"
+
+    msg = "; ".join(stopped) if stopped else "No EAC services/processes were running"
+    return True, msg
+
+
+def restore_eac_service():
+    """Re-enable EAC services (call when done editing)"""
+    eac_services = ["EasyAntiCheat", "EasyAntiCheat_EOS", "EasyAntiCheatSys"]
+    for svc in eac_services:
+        try:
+            subprocess.run(
+                ["sc", "config", svc, "start=", "demand"],
+                capture_output=True, timeout=10
+            )
+        except Exception:
+            pass
+
+
+def launch_game_without_eac() -> tuple[bool, str]:
+    """Full procedure: kill game, stop EAC, relaunch game directly.
+
+    Returns:
+        (success, message)
+    """
+    messages = []
+
+    # Step 1: Kill existing game
+    pid = find_game_pid()
+    if pid:
+        kill_game_process()
+        messages.append("Killed existing NBA2K26.exe")
+        import time
+        time.sleep(2)
+
+    # Step 2: Stop EAC
+    eac_ok, eac_msg = stop_eac_service()
+    messages.append(f"EAC: {eac_msg}")
+    if not eac_ok:
+        return False, " | ".join(messages) + " | WARNING: EAC may still be active"
+
+    # Step 3: Find game exe
+    exe = _find_game_exe()
+    if not exe:
+        return False, " | ".join(messages) + " | Cannot find NBA2K26.exe"
+
+    # Step 4: Launch directly
+    try:
+        subprocess.Popen([exe], cwd=os.path.dirname(exe))
+        messages.append(f"Launched {exe}")
+        return True, " | ".join(messages)
+    except Exception as e:
+        return False, " | ".join(messages) + f" | Launch failed: {e}"
+
+
+def _find_game_exe() -> Optional[str]:
+    """Search for NBA2K26.exe in common locations"""
+    # If game is running, get its path
+    exe = get_game_exe_path()
+    if exe and os.path.exists(exe):
+        return exe
+
+    import sys
+    search_paths = []
+
+    # Same directory as trainer
+    if getattr(sys, 'frozen', False):
+        trainer_dir = os.path.dirname(sys.executable)
+    else:
+        trainer_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    search_paths.append(os.path.join(trainer_dir, "NBA2K26.exe"))
+    search_paths.append(os.path.join(os.path.dirname(trainer_dir), "NBA2K26.exe"))
+
+    search_paths.extend([
+        r"C:\SteamLibrary\steamapps\common\NBA 2K26\NBA2K26.exe",
+        r"D:\SteamLibrary\steamapps\common\NBA 2K26\NBA2K26.exe",
+        r"C:\Program Files (x86)\Steam\steamapps\common\NBA 2K26\NBA2K26.exe",
+    ])
+
+    for p in search_paths:
+        if os.path.exists(p):
+            return p
+    return None
 
 
 # ============================================================

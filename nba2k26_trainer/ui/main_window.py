@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QFont
 
-from ..core.process import attach_to_game, is_process_running, launch_game_without_eac
+from ..core.process import attach_to_game, is_process_running, launch_game_without_eac, stop_eac_service, kill_game_process, restore_eac_service
 from ..core.offsets import initialize_offsets, get_offsets, get_default_offsets_path, OffsetConfig
 from ..core.memory import GameMemory
 from ..models.player import Player, PlayerManager
@@ -185,59 +185,45 @@ class MainWindow(QMainWindow):
             )
 
     def _launch_no_eac(self):
-        """Launch game directly without EAC"""
-        # Try to find NBA2K26.exe
-        import sys
-        search_paths = []
+        """Kill game + stop EAC service + relaunch game directly"""
+        self.statusbar.showMessage("Stopping EAC and relaunching game ...")
+        self.btn_launch.setEnabled(False)
+        self.btn_connect.setEnabled(False)
 
-        # Same directory as trainer
-        if getattr(sys, 'frozen', False):
-            trainer_dir = os.path.dirname(sys.executable)
-        else:
-            trainer_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        search_paths.append(os.path.join(trainer_dir, "NBA2K26.exe"))
+        # Force UI update before blocking operations
+        from PyQt5.QtWidgets import QApplication as _QApp
+        _QApp.processEvents()
 
-        # Parent directory (if trainer is in subfolder)
-        parent = os.path.dirname(trainer_dir)
-        search_paths.append(os.path.join(parent, "NBA2K26.exe"))
+        success, msg = launch_game_without_eac()
 
-        # Common Steam paths
-        search_paths.extend([
-            r"C:\SteamLibrary\steamapps\common\NBA 2K26\NBA2K26.exe",
-            r"D:\SteamLibrary\steamapps\common\NBA 2K26\NBA2K26.exe",
-            r"C:\Program Files (x86)\Steam\steamapps\common\NBA 2K26\NBA2K26.exe",
-        ])
+        self.btn_launch.setEnabled(True)
+        self.btn_connect.setEnabled(True)
 
-        exe_path = None
-        for p in search_paths:
-            if os.path.exists(p):
-                exe_path = p
-                break
-
-        if not exe_path:
-            QMessageBox.warning(
-                self, "Not Found",
-                "Cannot find NBA2K26.exe.\n\n"
-                "Please place this trainer in the NBA 2K26 game directory,\n"
-                "or launch NBA2K26.exe manually (not start_protected_game.exe)."
-            )
-            return
-
-        import subprocess
-        try:
-            subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path))
+        if success:
             self.statusbar.showMessage(
-                f"Launched: {exe_path} (No EAC) - Wait for game to load, then click [Connect Game]"
+                "Game launched without EAC - Wait for game to load, then click [Connect Game]"
             )
             QMessageBox.information(
-                self, "Game Launched",
-                f"NBA2K26.exe launched without EAC.\n\n"
-                f"Path: {exe_path}\n\n"
+                self, "Game Launched (No EAC)",
+                f"NBA2K26.exe launched WITHOUT EasyAntiCheat.\n\n"
+                f"Steps:\n"
+                f"  {msg}\n\n"
                 "Wait for the game to fully load into MyNBA/MyGM mode,\n"
-                "then click [Connect Game]."
+                "then click [Connect Game].\n\n"
+                "NOTE: Online features will not work without EAC."
             )
-        except Exception as e:
-            QMessageBox.critical(self, "Launch Failed", f"Failed to launch:\n{e}")
+        else:
+            self.statusbar.showMessage("Launch failed")
+            QMessageBox.critical(
+                self, "Launch Failed",
+                f"Failed to launch game without EAC.\n\n"
+                f"Details: {msg}\n\n"
+                "Try manually:\n"
+                "1. Close NBA 2K26 completely\n"
+                "2. Open Services (services.msc) and stop EasyAntiCheat\n"
+                "3. Run NBA2K26.exe directly (NOT start_protected_game.exe)\n"
+                "4. Then click [Connect Game]"
+            )
 
     def _refresh_players(self):
         if self.player_mgr is None:
