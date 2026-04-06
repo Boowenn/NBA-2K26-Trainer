@@ -292,137 +292,137 @@ def get_game_exe_path() -> Optional[str]:
 
 
 def kill_game_process() -> bool:
-    """Kill any running NBA2K26.exe process"""
-    try:
-        result = subprocess.run(
-            ["taskkill", "/F", "/IM", "NBA2K26.exe"],
-            capture_output=True, timeout=10
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def _get_game_dir_from_exe(exe_path: str) -> str:
-    return os.path.dirname(exe_path)
-
-
-# EAC files that need to be disabled (relative to game directory)
-_EAC_FILES_TO_DISABLE = [
-    r"data\epic_online_service\eossdk-win64-shipping.dll",
-    r"EasyAntiCheat\EasyAntiCheat_EOS_Setup.exe",
-    r"start_protected_game.exe",
-]
-
-_BACKUP_SUFFIX = ".disabled_by_trainer"
-
-
-def disable_eac_files(game_dir: str) -> tuple[bool, list[str]]:
-    """Rename EAC-related files so the game can't load them.
-
-    Returns:
-        (any_renamed, list of status messages)
-    """
-    messages = []
-    any_renamed = False
-    for rel_path in _EAC_FILES_TO_DISABLE:
-        src = os.path.join(game_dir, rel_path)
-        dst = src + _BACKUP_SUFFIX
-        if os.path.exists(dst):
-            messages.append(f"Already disabled: {rel_path}")
-            any_renamed = True
-            continue
-        if os.path.exists(src):
-            try:
-                os.rename(src, dst)
-                messages.append(f"Disabled: {rel_path}")
-                any_renamed = True
-            except PermissionError:
-                messages.append(f"FAILED (access denied): {rel_path}")
-            except Exception as e:
-                messages.append(f"FAILED ({e}): {rel_path}")
-        else:
-            messages.append(f"Not found (skip): {rel_path}")
-    return any_renamed, messages
-
-
-def restore_eac_files(game_dir: str) -> list[str]:
-    """Restore EAC files that were disabled by the trainer."""
-    messages = []
-    for rel_path in _EAC_FILES_TO_DISABLE:
-        src = os.path.join(game_dir, rel_path) + _BACKUP_SUFFIX
-        dst = os.path.join(game_dir, rel_path)
-        if os.path.exists(src):
-            try:
-                os.rename(src, dst)
-                messages.append(f"Restored: {rel_path}")
-            except Exception as e:
-                messages.append(f"Restore failed ({e}): {rel_path}")
-    return messages
-
-
-def stop_eac_service() -> list[str]:
-    """Stop EAC services and kill EAC processes."""
-    messages = []
-
-    # Kill EAC processes
-    for proc_name in ["EasyAntiCheat.exe", "EasyAntiCheat_EOS.exe",
-                       "EasyAntiCheat_Setup.exe", "start_protected_game.exe"]:
+    """Kill any running NBA2K26.exe and EAC processes"""
+    killed = False
+    for proc_name in ["NBA2K26.exe", "start_protected_game.exe",
+                       "EasyAntiCheat.exe", "EasyAntiCheat_EOS.exe"]:
         try:
             r = subprocess.run(["taskkill", "/F", "/IM", proc_name],
                                capture_output=True, timeout=10)
             if r.returncode == 0:
-                messages.append(f"Killed {proc_name}")
+                killed = True
         except Exception:
             pass
-
-    # Stop EAC services
-    for svc in ["EasyAntiCheat", "EasyAntiCheat_EOS", "EasyAntiCheatSys"]:
-        try:
-            r = subprocess.run(["sc", "stop", svc], capture_output=True, timeout=10)
-            if r.returncode == 0:
-                messages.append(f"Stopped service {svc}")
-        except Exception:
-            pass
-    return messages
+    return killed
 
 
-def launch_game_without_eac() -> tuple[bool, str]:
-    """Full procedure: kill game, stop EAC services, disable EAC files, relaunch.
+def _get_game_dir(exe_path: str) -> str:
+    return os.path.dirname(exe_path)
+
+
+# Only disable the EOS SDK DLL - this is what loads EAC inside the game process.
+# Do NOT touch start_protected_game.exe (Steam needs it) or the EAC folder.
+_BACKUP_SUFFIX = ".disabled_by_trainer"
+
+_EAC_DLL = r"data\epic_online_service\eossdk-win64-shipping.dll"
+
+
+def disable_eac_dll(game_dir: str) -> tuple[bool, str]:
+    """Rename the EOS SDK DLL so the game cannot load EAC.
 
     Returns:
         (success, message)
     """
+    src = os.path.join(game_dir, _EAC_DLL)
+    dst = src + _BACKUP_SUFFIX
+
+    if os.path.exists(dst):
+        return True, "EOS SDK already disabled"
+    if not os.path.exists(src):
+        return True, "EOS SDK not found (may already be disabled)"
+    try:
+        os.rename(src, dst)
+        return True, "Disabled EOS SDK (eossdk-win64-shipping.dll)"
+    except PermissionError:
+        return False, "Cannot rename EOS SDK DLL - access denied. Close the game first!"
+    except Exception as e:
+        return False, f"Cannot rename EOS SDK DLL: {e}"
+
+
+def restore_eac_dll(game_dir: str) -> str:
+    """Restore the EOS SDK DLL so Steam/EAC can work normally."""
+    src = os.path.join(game_dir, _EAC_DLL + _BACKUP_SUFFIX)
+    dst = os.path.join(game_dir, _EAC_DLL)
+    if not os.path.exists(src):
+        return "Nothing to restore"
+    try:
+        if os.path.exists(dst):
+            os.remove(src)
+            return "Original already exists, cleaned up backup"
+        os.rename(src, dst)
+        return "Restored EOS SDK DLL"
+    except Exception as e:
+        return f"Restore failed: {e}"
+
+
+def stop_eac_services() -> list[str]:
+    """Stop EAC kernel driver and services."""
+    messages = []
+
+    # Stop EAC services (this unloads the kernel driver)
+    for svc in ["EasyAntiCheat", "EasyAntiCheat_EOS", "EasyAntiCheatSys"]:
+        try:
+            r = subprocess.run(["sc", "stop", svc], capture_output=True, timeout=10)
+            if r.returncode == 0:
+                messages.append(f"Stopped {svc}")
+        except Exception:
+            pass
+
+    # Also try to unload EAC minifilter driver directly
+    try:
+        r = subprocess.run(["fltmc", "unload", "EasyAntiCheatEOS"],
+                           capture_output=True, timeout=10)
+        if r.returncode == 0:
+            messages.append("Unloaded EAC filter driver")
+    except Exception:
+        pass
+
+    return messages
+
+
+def launch_game_without_eac() -> tuple[bool, str]:
+    """Full procedure: kill game & EAC, disable EAC DLL, relaunch directly.
+
+    Steps:
+    1. Kill game + EAC processes
+    2. Stop EAC kernel driver/services
+    3. Rename eossdk-win64-shipping.dll (prevents game from loading EAC)
+    4. Launch NBA2K26.exe directly (not through Steam/start_protected_game.exe)
+
+    Returns:
+        (success, detail_message)
+    """
     import time
     steps = []
 
-    # Step 1: Kill existing game
-    pid = find_game_pid()
-    if pid:
-        kill_game_process()
-        steps.append("1. Killed existing game")
-        time.sleep(2)
-
-    # Step 2: Find game exe first (need game dir for file operations)
+    # Step 1: Find game exe (need game dir)
     exe = _find_game_exe()
     if not exe:
         return False, "Cannot find NBA2K26.exe"
-    game_dir = _get_game_dir_from_exe(exe)
+    game_dir = _get_game_dir(exe)
 
-    # Step 3: Stop EAC services
-    svc_msgs = stop_eac_service()
+    # Step 2: Kill existing game + EAC processes
+    if find_game_pid():
+        kill_game_process()
+        steps.append("Killed game & EAC processes")
+        time.sleep(3)
+
+    # Step 3: Stop EAC kernel driver
+    svc_msgs = stop_eac_services()
     if svc_msgs:
-        steps.append(f"2. {'; '.join(svc_msgs)}")
+        steps.append("; ".join(svc_msgs))
     time.sleep(1)
 
-    # Step 4: Disable EAC files (the critical step!)
-    disabled, file_msgs = disable_eac_files(game_dir)
-    steps.append(f"3. Files: {'; '.join(file_msgs)}")
+    # Step 4: Disable EOS SDK DLL (THE key step)
+    dll_ok, dll_msg = disable_eac_dll(game_dir)
+    steps.append(dll_msg)
+    if not dll_ok:
+        return False, "\n".join(steps)
 
-    # Step 5: Launch game
+    # Step 5: Launch NBA2K26.exe directly
     try:
         subprocess.Popen([exe], cwd=game_dir)
-        steps.append(f"4. Launched {os.path.basename(exe)}")
+        steps.append(f"Launched {os.path.basename(exe)} (No EAC)")
         return True, "\n".join(steps)
     except Exception as e:
         return False, "\n".join(steps) + f"\nLaunch failed: {e}"

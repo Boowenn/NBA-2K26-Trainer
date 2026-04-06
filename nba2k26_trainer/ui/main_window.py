@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QFont
 
-from ..core.process import attach_to_game, is_process_running, launch_game_without_eac, restore_eac_files, _find_game_exe, _get_game_dir_from_exe
+from ..core.process import attach_to_game, is_process_running, launch_game_without_eac, restore_eac_dll, _find_game_exe, _get_game_dir
 from ..core.offsets import initialize_offsets, get_offsets, get_default_offsets_path, OffsetConfig
 from ..core.memory import GameMemory
 from ..models.player import Player, PlayerManager
@@ -282,8 +282,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.mem:
             self.mem.close()
-        # Restore EAC files so Steam can launch normally next time
+        # Restore EAC DLL so Steam can launch normally next time
         exe = _find_game_exe()
         if exe:
-            restore_eac_files(_get_game_dir_from_exe(exe))
+            restore_eac_dll(_get_game_dir(exe))
         event.accept()
