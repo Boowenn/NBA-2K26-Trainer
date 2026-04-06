@@ -25,14 +25,17 @@ class AttributeDef:
 class PlayerTableDef:
     """球员表定义"""
     signature: str = ""        # AOB 特征码
-    pointer_offsets: List[int] = field(default_factory=list)  # 指针链
-    stride: int = 712          # 每个球员记录的字节大小
+    base_pointer: int = 0      # 直接基址指针（绝对地址）
+    pointer_offsets: List[int] = field(default_factory=list)  # 指针链（空=直接表）
+    stride: int = 1176         # 每个球员记录的字节大小 (0x498)
     count_offset: int = 0      # 球员数量的偏移
     max_players: int = 600
     name_offset: int = 0       # 姓名字段相对于记录起始的偏移
-    first_name_offset: int = 0
-    last_name_offset: int = 16
-    team_id_offset: int = 48
+    first_name_offset: int = 40   # 0x28
+    last_name_offset: int = 0     # 0x0
+    team_id_offset: int = -1      # -1 = 不使用简单 team_id
+    name_string_length: int = 20  # 姓名最大字符数
+    direct_table: bool = True     # 直接表寻址（无需解引用指针）
 
 
 @dataclass
@@ -72,14 +75,17 @@ def load_offsets(filepath: str) -> OffsetConfig:
     pt = data.get("player_table", {})
     config.player_table = PlayerTableDef(
         signature=pt.get("signature", ""),
+        base_pointer=pt.get("base_pointer", 0),
         pointer_offsets=pt.get("pointer_offsets", []),
-        stride=pt.get("stride", 712),
+        stride=pt.get("stride", 1176),
         count_offset=pt.get("count_offset", 0),
         max_players=pt.get("max_players", 600),
         name_offset=pt.get("name_offset", 0),
-        first_name_offset=pt.get("first_name_offset", 0),
-        last_name_offset=pt.get("last_name_offset", 16),
-        team_id_offset=pt.get("team_id_offset", 48),
+        first_name_offset=pt.get("first_name_offset", 40),
+        last_name_offset=pt.get("last_name_offset", 0),
+        team_id_offset=pt.get("team_id_offset", -1),
+        name_string_length=pt.get("name_string_length", 20),
+        direct_table=pt.get("direct_table", True),
     )
 
     attrs_data = data.get("attributes", {})

@@ -31,7 +31,7 @@ class MainWindow(QMainWindow):
         self.players = []
         self._player_index_map = {}
 
-        self.setWindowTitle("NBA 2K26 Trainer - 球员属性修改器 v1.0")
+        self.setWindowTitle("NBA 2K26 Trainer - 球员属性修改器 v1.1")
         self.setMinimumSize(1200, 750)
         self.resize(1400, 850)
 

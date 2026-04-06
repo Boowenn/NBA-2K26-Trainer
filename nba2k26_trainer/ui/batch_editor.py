@@ -44,12 +44,12 @@ class BatchEditorDialog(QDialog):
         btn_all_99.clicked.connect(self._batch_all_99)
         quick_layout.addWidget(btn_all_99)
 
-        btn_young = QPushButton("全部年龄设为 20 岁")
-        btn_young.clicked.connect(lambda: self._batch_set_attr("年龄", 20))
+        btn_young = QPushButton("全部出生年份设为 2006 (约20岁)")
+        btn_young.clicked.connect(lambda: self._batch_set_attr("出生年份", 2006))
         quick_layout.addWidget(btn_young)
 
-        btn_potential = QPushButton("全部潜力设为 99")
-        btn_potential.clicked.connect(lambda: self._batch_set_attr("潜力", 99))
+        btn_potential = QPushButton("全部潜力均值设为 99")
+        btn_potential.clicked.connect(lambda: self._batch_set_attr("潜力均值", 99))
         quick_layout.addWidget(btn_potential)
 
         btn_stamina = QPushButton("全部耐力设为 99")
@@ -136,24 +136,29 @@ class BatchEditorDialog(QDialog):
         QMessageBox.information(self, "完成", f"已将 {len(self.players)} 名球员的能力值全部设为最大")
 
     def _batch_all_badges_hof(self):
-        """全部徽章设为名人堂"""
+        """全部徽章设为最高等级"""
+        badge_categories = [c for c in self.config.categories() if "徽章" in c]
         self.progress.setVisible(True)
         self.progress.setMaximum(len(self.players))
 
         for i, player in enumerate(self.players):
-            self.player_mgr.set_all_to_max(player, ["徽章"])
+            self.player_mgr.set_all_to_max(player, badge_categories)
             self.progress.setValue(i + 1)
 
         self.progress.setVisible(False)
-        QMessageBox.information(self, "完成", f"已将 {len(self.players)} 名球员的徽章全部设为名人堂")
+        QMessageBox.information(self, "完成", f"已将 {len(self.players)} 名球员的徽章全部设为最高等级")
 
     def _batch_all_hotzones(self):
         """全部热区设为极热"""
+        hotzone_categories = [c for c in self.config.categories() if "热区" in c]
+        if not hotzone_categories:
+            QMessageBox.information(self, "提示", "当前配置中没有热区属性")
+            return
         self.progress.setVisible(True)
         self.progress.setMaximum(len(self.players))
 
         for i, player in enumerate(self.players):
-            self.player_mgr.set_all_to_max(player, ["热区"])
+            self.player_mgr.set_all_to_max(player, hotzone_categories)
             self.progress.setValue(i + 1)
 
         self.progress.setVisible(False)

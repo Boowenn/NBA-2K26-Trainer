@@ -2,8 +2,8 @@
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QScrollArea,
-    QLabel, QSpinBox, QSlider, QGridLayout, QPushButton, QMessageBox,
-    QGroupBox, QFrame
+    QLabel, QSpinBox, QDoubleSpinBox, QSlider, QGridLayout, QPushButton,
+    QMessageBox, QGroupBox, QFrame
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -29,14 +29,16 @@ class AttributeRow(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(8)
 
+        self._is_float = self.attr.type == "float"
+
         # 属性名
         self.name_label = QLabel(self.attr.name)
         self.name_label.setFixedWidth(120)
         self.name_label.setToolTip(self.attr.description)
         layout.addWidget(self.name_label)
 
-        # 滑块 (仅数值型)
-        if self.attr.type not in ("wstring", "ascii"):
+        # 滑块 (仅数值型, 非 float)
+        if self.attr.type not in ("wstring", "ascii", "float"):
             self.slider = QSlider(Qt.Horizontal)
             self.slider.setMinimum(self.attr.min_val)
             self.slider.setMaximum(self.attr.max_val)
@@ -47,10 +49,17 @@ class AttributeRow(QWidget):
             layout.addStretch(1)
 
         # 数值输入
-        self.spin = QSpinBox()
-        self.spin.setMinimum(self.attr.min_val)
-        self.spin.setMaximum(self.attr.max_val)
-        self.spin.setFixedWidth(80)
+        if self._is_float:
+            self.spin = QDoubleSpinBox()
+            self.spin.setDecimals(2)
+            self.spin.setMinimum(float(self.attr.min_val))
+            self.spin.setMaximum(float(self.attr.max_val))
+            self.spin.setSingleStep(0.5)
+        else:
+            self.spin = QSpinBox()
+            self.spin.setMinimum(self.attr.min_val)
+            self.spin.setMaximum(self.attr.max_val)
+        self.spin.setFixedWidth(100)
         self.spin.valueChanged.connect(self._on_spin_changed)
         layout.addWidget(self.spin)
 
@@ -199,10 +208,13 @@ class AttributeEditorWidget(QWidget):
     def load_player(self, player: Player):
         """加载球员数据到编辑面板"""
         self.current_player = player
-        self.player_info.setText(
-            f"{player.full_name}  |  {player.team_name}  |  {player.position}  |  "
-            f"OVR {player.overall}  |  {player.age}岁"
-        )
+        info_parts = [player.full_name]
+        if player.team_name:
+            info_parts.append(player.team_name)
+        info_parts.append(f"OVR {player.overall}")
+        if player.age > 0:
+            info_parts.append(f"{player.age}岁 (生于{player.birth_year})")
+        self.player_info.setText("  |  ".join(info_parts))
 
         if self.player_mgr is None:
             return
@@ -257,9 +269,13 @@ class AttributeEditorWidget(QWidget):
                 self._attr_rows[attr.name].set_value(attr.max_val)
 
     def _set_all_max(self):
-        """全部属性设为最大值"""
+        """全部属性设为最大值（能力值相关分类）"""
         for category in ["进攻能力", "防守能力", "体能属性", "篮球智商"]:
             self._set_category_max(category)
+        # 徽章全满
+        for category in self.config.categories():
+            if "徽章" in category:
+                self._set_category_max(category)
 
     def set_player_manager(self, mgr: PlayerManager):
         self.player_mgr = mgr

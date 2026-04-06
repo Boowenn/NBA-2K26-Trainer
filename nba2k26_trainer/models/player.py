@@ -1,5 +1,6 @@
 """球员数据模型 - 扫描球员列表、读写属性"""
 
+import datetime
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
@@ -18,6 +19,7 @@ class Player:
     team_name: str = ""
     overall: int = 0
     age: int = 0
+    birth_year: int = 0
     position: str = ""
 
     @property
@@ -40,6 +42,20 @@ TEAM_NAMES = {
 POSITION_MAP = {0: "PG", 1: "SG", 2: "SF", 3: "PF", 4: "C"}
 
 
+def birth_year_to_age(birth_year: int) -> int:
+    """出生年份转换为当前年龄"""
+    if birth_year <= 0 or birth_year > 2020:
+        return 0
+    current_year = datetime.datetime.now().year
+    return current_year - birth_year
+
+
+def age_to_birth_year(age: int) -> int:
+    """年龄转换为出生年份"""
+    current_year = datetime.datetime.now().year
+    return current_year - age
+
+
 class PlayerManager:
     """球员管理器 - 扫描和读写球员数据"""
 
@@ -52,11 +68,25 @@ class PlayerManager:
     def _resolve_table_base(self) -> Optional[int]:
         """解析球员表基地址"""
         pt = self.config.player_table
+
+        if pt.direct_table and pt.base_pointer > 0:
+            # 直接表寻址：基址指针指向球员表起始位置
+            # 需要从游戏进程内存中读取该指针指向的地址
+            table_ptr = self.mem.read_uint64(self.mem.base_address + pt.base_pointer)
+            if table_ptr and table_ptr != 0:
+                return table_ptr
+            # 如果从模块基址偏移读取失败，尝试直接使用绝对地址
+            table_ptr = self.mem.read_uint64(pt.base_pointer)
+            if table_ptr and table_ptr != 0:
+                return table_ptr
+            return None
+
         if pt.pointer_offsets:
             base = self.mem.resolve_pointer_chain(
                 self.mem.base_address, pt.pointer_offsets
             )
             return base
+
         return None
 
     def scan_players(self) -> List[Player]:
@@ -67,12 +97,14 @@ class PlayerManager:
 
         pt = self.config.player_table
         players = []
+        name_len = pt.name_string_length
 
         for i in range(pt.max_players):
             record_addr = self._table_base + i * pt.stride
 
-            first_name = self.mem.read_wstring(record_addr + pt.first_name_offset, 16)
-            last_name = self.mem.read_wstring(record_addr + pt.last_name_offset, 16)
+            # 读取姓名
+            last_name = self.mem.read_wstring(record_addr + pt.last_name_offset, name_len)
+            first_name = self.mem.read_wstring(record_addr + pt.first_name_offset, name_len)
 
             if not first_name and not last_name:
                 continue
@@ -85,31 +117,26 @@ class PlayerManager:
             if len(first_name.strip()) == 0 and len(last_name.strip()) == 0:
                 continue
 
-            team_id_val = self.mem.read_uint32(record_addr + pt.team_id_offset)
-            team_id = team_id_val if team_id_val is not None else -1
-
             player = Player(
                 index=i,
                 record_address=record_addr,
                 first_name=first_name.strip(),
                 last_name=last_name.strip(),
-                team_id=team_id,
-                team_name=TEAM_NAMES.get(team_id, f"Team {team_id}"),
             )
 
-            # 读取年龄和综合评分
-            age_attr = self.config.get_attribute("年龄")
-            if age_attr:
-                player.age = self.read_attribute(player, age_attr) or 0
-
+            # 读取综合评分
             ovr_attr = self.config.get_attribute("综合评分")
             if ovr_attr:
-                player.overall = self.read_attribute(player, ovr_attr) or 0
+                val = self.read_attribute(player, ovr_attr)
+                player.overall = val if val is not None else 0
 
-            pos_attr = self.config.get_attribute("位置")
-            if pos_attr:
-                pos_val = self.read_attribute(player, pos_attr)
-                player.position = POSITION_MAP.get(pos_val, "?") if pos_val is not None else "?"
+            # 读取出生年份 -> 计算年龄
+            birth_attr = self.config.get_attribute("出生年份")
+            if birth_attr:
+                val = self.read_attribute(player, birth_attr)
+                if val is not None and 1950 < val < 2020:
+                    player.birth_year = val
+                    player.age = birth_year_to_age(val)
 
             players.append(player)
 
@@ -152,7 +179,10 @@ class PlayerManager:
 
         # 数值范围校验
         if isinstance(value, (int, float)) and t not in ("wstring", "ascii"):
-            value = max(attr.min_val, min(attr.max_val, int(value) if t != "float" else value))
+            if t == "float":
+                value = max(float(attr.min_val), min(float(attr.max_val), float(value)))
+            else:
+                value = max(attr.min_val, min(attr.max_val, int(value)))
 
         if t == "uint8":
             return self.mem.write_uint8(addr, value)
