@@ -37,6 +37,18 @@ TEAM_STRIDE = 5672           # team record stride
 POSITION_MAP = {0: "PG", 1: "SG", 2: "SF", 3: "PF", 4: "C"}
 
 
+def _is_valid_name(text: str) -> bool:
+    """Check if a string looks like a valid player/team name"""
+    if not text or len(text) < 2:
+        return False
+    # Reject strings with control chars or replacement chars
+    for c in text:
+        code = ord(c)
+        if code < 32 or code == 0xFFFD:
+            return False
+    return True
+
+
 def birth_year_to_age(birth_year: int) -> int:
     """出生年份转换为当前年龄"""
     if birth_year <= 0 or birth_year > 2020:
@@ -148,42 +160,60 @@ class PlayerManager:
             last_name = self.mem.read_wstring(record_addr + pt.last_name_offset, name_len)
             first_name = self.mem.read_wstring(record_addr + pt.first_name_offset, name_len)
 
-            if not first_name and not last_name:
-                continue
-            if first_name is None:
-                first_name = ""
-            if last_name is None:
-                last_name = ""
+            last_name = (last_name or "").strip()
+            first_name = (first_name or "").strip()
 
             # 跳过空记录
-            if len(first_name.strip()) == 0 and len(last_name.strip()) == 0:
+            if not first_name and not last_name:
+                continue
+
+            # 跳过乱码记录 - 名字必须是可读字符
+            if not _is_valid_name(first_name) and not _is_valid_name(last_name):
                 continue
 
             player = Player(
                 index=i,
                 record_address=record_addr,
-                first_name=first_name.strip(),
-                last_name=last_name.strip(),
+                first_name=first_name,
+                last_name=last_name,
             )
 
             # 读取球队指针 -> 解析球队名称和ID
             team_ptr = self.mem.read_uint64(record_addr + TEAM_PTR_OFFSET)
-            if team_ptr and team_ptr > 0:
+            if team_ptr and 0x10000 < team_ptr < 0x7FFFFFFFFFFF:
                 if team_ptr in team_cache:
                     player.team_name, player.team_id = team_cache[team_ptr]
                 else:
                     tname = self.mem.read_wstring(team_ptr + TEAM_NAME_OFFSET, TEAM_NAME_LENGTH)
                     tname = (tname or "").strip()
-                    if tname and all(32 <= ord(c) <= 126 for c in tname):
+                    if _is_valid_name(tname):
                         tid = team_id_counter
                         team_id_counter += 1
                         team_cache[team_ptr] = (tname, tid)
                         player.team_name = tname
                         player.team_id = tid
-                    else:
+                    elif team_ptr == 0:
                         team_cache[team_ptr] = ("Free Agent", -2)
                         player.team_name = "Free Agent"
                         player.team_id = -2
+                    else:
+                        # Team pointer valid but name unreadable - try alternate offsets
+                        found_team = False
+                        for alt_off in [0, 40, 80, 692, 824]:
+                            alt_name = self.mem.read_wstring(team_ptr + alt_off, 24)
+                            alt_name = (alt_name or "").strip()
+                            if _is_valid_name(alt_name) and len(alt_name) >= 3:
+                                tid = team_id_counter
+                                team_id_counter += 1
+                                team_cache[team_ptr] = (alt_name, tid)
+                                player.team_name = alt_name
+                                player.team_id = tid
+                                found_team = True
+                                break
+                        if not found_team:
+                            team_cache[team_ptr] = ("Unknown", -2)
+                            player.team_name = "Unknown"
+                            player.team_id = -2
 
             # 读取综合评分
             ovr_attr = self.config.get_attribute("综合评分")
@@ -302,4 +332,48 @@ class PlayerManager:
                     continue
                 if self.write_attribute(player, attr, attr.max_val):
                     count += 1
+        return count
+
+    def apply_god_mode(self, player: Player) -> int:
+        """超级模式 - 所有能力99 + 全徽章满级 + 全倾向拉满 + 全耐久满"""
+        count = 0
+        # 所有能力属性设为99
+        ability_cats = ["进攻能力", "防守能力", "体能属性", "篮球智商"]
+        for cat in ability_cats:
+            attrs = self.config.attributes.get(cat, [])
+            for attr in attrs:
+                if attr.type in ("wstring", "ascii"):
+                    continue
+                if self.write_attribute(player, attr, attr.max_val):
+                    count += 1
+
+        # 所有徽章满级
+        badge_cats = [c for c in self.config.categories() if "徽章" in c]
+        for cat in badge_cats:
+            attrs = self.config.attributes.get(cat, [])
+            for attr in attrs:
+                if self.write_attribute(player, attr, attr.max_val):
+                    count += 1
+
+        # 所有倾向拉满
+        tendency_cats = [c for c in self.config.categories()
+                         if "倾向" in c or "风格" in c]
+        for cat in tendency_cats:
+            attrs = self.config.attributes.get(cat, [])
+            for attr in attrs:
+                if self.write_attribute(player, attr, attr.max_val):
+                    count += 1
+
+        # 耐久性满
+        dur_attrs = self.config.attributes.get("耐久性", [])
+        for attr in dur_attrs:
+            if self.write_attribute(player, attr, attr.max_val):
+                count += 1
+
+        # 潜力拉满
+        pot_attrs = self.config.attributes.get("潜力与成长", [])
+        for attr in pot_attrs:
+            if self.write_attribute(player, attr, attr.max_val):
+                count += 1
+
         return count

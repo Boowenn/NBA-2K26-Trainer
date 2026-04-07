@@ -182,6 +182,16 @@ class AttributeEditorWidget(QWidget):
         self.btn_max_all.clicked.connect(self._set_all_max)
         btn_layout.addWidget(self.btn_max_all)
 
+        self.btn_god = QPushButton("⚡ 超级模式")
+        self.btn_god.setObjectName("btn_god")
+        self.btn_god.setToolTip(
+            "一键开启超级模式：全能力99 + 全徽章满级\n"
+            "+ 全投篮/突破/防守倾向拉满 + 全耐久满\n"
+            "+ 潜力拉满 → 投篮必进、突破无解"
+        )
+        self.btn_god.clicked.connect(self._apply_god_mode)
+        btn_layout.addWidget(self.btn_god)
+
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
@@ -276,6 +286,36 @@ class AttributeEditorWidget(QWidget):
         for category in self.config.categories():
             if "徽章" in category:
                 self._set_category_max(category)
+
+    def _apply_god_mode(self):
+        """超级模式 - 直接写入内存，全属性拉满"""
+        if self.current_player is None or self.player_mgr is None:
+            QMessageBox.warning(self, "警告", "请先选择一名球员")
+            return
+
+        reply = QMessageBox.question(
+            self, "超级模式",
+            f"确定要对 {self.current_player.full_name} 开启超级模式？\n\n"
+            "将会设置：\n"
+            "• 全部能力值 → 99\n"
+            "• 全部徽章 → 最高等级\n"
+            "• 全部投篮/突破/防守倾向 → 最大值\n"
+            "• 全部耐久性 → 99\n"
+            "• 潜力/成长 → 最大值\n\n"
+            "效果：投篮几乎必进，包括半场三分",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        count = self.player_mgr.apply_god_mode(self.current_player)
+        QMessageBox.information(
+            self, "超级模式已激活",
+            f"已成功修改 {count} 项属性！\n\n"
+            f"{self.current_player.full_name} 现在是无敌的！"
+        )
+        # 重新加载显示
+        self.load_player(self.current_player)
 
     def set_player_manager(self, mgr: PlayerManager):
         self.player_mgr = mgr

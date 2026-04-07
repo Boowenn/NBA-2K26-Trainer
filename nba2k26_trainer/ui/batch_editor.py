@@ -65,6 +65,11 @@ class BatchEditorDialog(QDialog):
         btn_hotzones.clicked.connect(self._batch_all_hotzones)
         quick_layout.addWidget(btn_hotzones)
 
+        btn_god = QPushButton("全队超级模式 (全属性+全徽章+全倾向)")
+        btn_god.setObjectName("btn_god")
+        btn_god.clicked.connect(self._batch_god_mode)
+        quick_layout.addWidget(btn_god)
+
         layout.addWidget(group_quick)
 
         # 自定义修改
@@ -163,6 +168,30 @@ class BatchEditorDialog(QDialog):
 
         self.progress.setVisible(False)
         QMessageBox.information(self, "完成", f"已将 {len(self.players)} 名球员的热区全部设为极热")
+
+    def _batch_god_mode(self):
+        """全队超级模式"""
+        reply = QMessageBox.question(
+            self, "全队超级模式",
+            f"确定要对 {len(self.players)} 名球员全部开启超级模式？\n\n"
+            "全能力99 + 全徽章满级 + 全倾向拉满 + 全耐久满",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.progress.setVisible(True)
+        self.progress.setMaximum(len(self.players))
+
+        for i, player in enumerate(self.players):
+            self.player_mgr.apply_god_mode(player)
+            self.progress.setValue(i + 1)
+
+        self.progress.setVisible(False)
+        QMessageBox.information(
+            self, "完成",
+            f"已对 {len(self.players)} 名球员开启超级模式！"
+        )
 
     def _batch_custom(self):
         """自定义批量修改"""

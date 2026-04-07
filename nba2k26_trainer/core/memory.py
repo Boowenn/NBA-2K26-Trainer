@@ -137,16 +137,15 @@ class GameMemory:
     # --- String ---
 
     def read_wstring(self, address: int, max_len: int = 64) -> Optional[str]:
-        data = self.read_bytes(address, max_len * 2)
+        byte_len = max_len * 2
+        data = self.read_bytes(address, byte_len)
         if not data:
             return None
-        try:
-            null_idx = data.index(b'\x00\x00')
-            if null_idx % 2 == 1:
-                null_idx += 1
-            data = data[:null_idx]
-        except ValueError:
-            pass
+        # Find null terminator on 2-byte boundary (proper UTF-16LE)
+        for i in range(0, len(data) - 1, 2):
+            if data[i] == 0 and data[i + 1] == 0:
+                data = data[:i]
+                break
         return data.decode("utf-16-le", errors="replace")
 
     def write_wstring(self, address: int, value: str, fixed_len: int = 64) -> bool:

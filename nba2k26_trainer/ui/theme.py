@@ -74,6 +74,20 @@ QPushButton#btn_max:hover {
     background-color: #d32f2f;
 }
 
+QPushButton#btn_god {
+    background-color: #e65100;
+    border-color: #ff6d00;
+    font-weight: bold;
+    font-size: 14px;
+    color: #ffffff;
+    padding: 8px 20px;
+}
+
+QPushButton#btn_god:hover {
+    background-color: #ff6d00;
+    color: #1a1a2e;
+}
+
 QPushButton#btn_refresh {
     background-color: #1565c0;
     border-color: #1976d2;
