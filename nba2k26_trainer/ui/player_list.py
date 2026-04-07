@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 
-from ..models.player import Player, TEAM_NAMES
+from ..models.player import Player
 from typing import List, Optional
 
 
@@ -37,9 +37,7 @@ class PlayerListWidget(QWidget):
         search_layout.addWidget(self.search_input, 2)
 
         self.team_filter = QComboBox()
-        self.team_filter.addItem("全部球队", -1)
-        for tid, name in sorted(TEAM_NAMES.items()):
-            self.team_filter.addItem(name, tid)
+        self.team_filter.addItem("All Teams", -1)
         self.team_filter.currentIndexChanged.connect(self._apply_filter)
         search_layout.addWidget(self.team_filter, 1)
 
@@ -78,7 +76,32 @@ class PlayerListWidget(QWidget):
     def set_players(self, players: List[Player]):
         """设置球员列表"""
         self.players = players
+        self._rebuild_team_filter()
         self._apply_filter()
+
+    def _rebuild_team_filter(self):
+        """从球员数据动态构建球队筛选下拉"""
+        self.team_filter.blockSignals(True)
+        current_data = self.team_filter.currentData()
+        self.team_filter.clear()
+        self.team_filter.addItem("All Teams", -1)
+
+        # Collect unique teams from player data
+        teams = {}
+        for p in self.players:
+            if p.team_id >= 0 and p.team_name:
+                teams[p.team_id] = p.team_name
+
+        for tid, name in sorted(teams.items(), key=lambda x: x[1]):
+            self.team_filter.addItem(name, tid)
+
+        # Restore previous selection if possible
+        if current_data is not None and current_data != -1:
+            idx = self.team_filter.findData(current_data)
+            if idx >= 0:
+                self.team_filter.setCurrentIndex(idx)
+
+        self.team_filter.blockSignals(False)
 
     def _apply_filter(self):
         """应用搜索和球队筛选"""
@@ -137,11 +160,15 @@ class PlayerListWidget(QWidget):
         self.count_label.setText(f"共 {len(self._filtered_players)} 名球员")
 
     def _on_row_clicked(self, row: int, col: int):
-        """行点击事件"""
-        if row < 0 or row >= len(self._filtered_players):
+        """行点击事件 - 使用隐藏的索引列获取球员index（排序安全）"""
+        idx_item = self.table.item(row, 5)
+        if idx_item is None:
             return
-        player = self._filtered_players[row]
-        self.player_selected.emit(player.index)
+        try:
+            player_index = int(idx_item.text())
+            self.player_selected.emit(player_index)
+        except (ValueError, TypeError):
+            pass
 
     def get_selected_player_index(self) -> Optional[int]:
         """获取当前选中的球员 index"""

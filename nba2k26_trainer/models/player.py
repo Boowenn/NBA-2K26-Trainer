@@ -28,17 +28,11 @@ class Player:
         return f"{self.first_name} {self.last_name}".strip()
 
 
-# NBA 球队 ID -> 名称映射
-TEAM_NAMES = {
-    0: "ATL Hawks", 1: "BOS Celtics", 2: "BKN Nets", 3: "CHA Hornets",
-    4: "CHI Bulls", 5: "CLE Cavaliers", 6: "DAL Mavericks", 7: "DEN Nuggets",
-    8: "DET Pistons", 9: "GSW Warriors", 10: "HOU Rockets", 11: "IND Pacers",
-    12: "LAC Clippers", 13: "LAL Lakers", 14: "MEM Grizzlies", 15: "MIA Heat",
-    16: "MIL Bucks", 17: "MIN Timberwolves", 18: "NOP Pelicans", 19: "NYK Knicks",
-    20: "OKC Thunder", 21: "ORL Magic", 22: "PHI 76ers", 23: "PHX Suns",
-    24: "POR Trail Blazers", 25: "SAC Kings", 26: "SAS Spurs", 27: "TOR Raptors",
-    28: "UTA Jazz", 29: "WAS Wizards",
-}
+# Player record offsets for team pointer resolution
+TEAM_PTR_OFFSET = 96         # 0x60 - uint64 pointer to team record
+TEAM_NAME_OFFSET = 738       # 0x2E2 - wstring in team record
+TEAM_NAME_LENGTH = 24        # max chars
+TEAM_STRIDE = 5672           # team record stride
 
 POSITION_MAP = {0: "PG", 1: "SG", 2: "SF", 3: "PF", 4: "C"}
 
@@ -143,6 +137,10 @@ class PlayerManager:
         players = []
         name_len = pt.name_string_length
 
+        # Team pointer cache: team_ptr -> (team_name, team_id)
+        team_cache: Dict[int, tuple] = {}
+        team_id_counter = 0
+
         for i in range(pt.max_players):
             record_addr = self._table_base + i * pt.stride
 
@@ -168,6 +166,25 @@ class PlayerManager:
                 last_name=last_name.strip(),
             )
 
+            # 读取球队指针 -> 解析球队名称和ID
+            team_ptr = self.mem.read_uint64(record_addr + TEAM_PTR_OFFSET)
+            if team_ptr and team_ptr > 0:
+                if team_ptr in team_cache:
+                    player.team_name, player.team_id = team_cache[team_ptr]
+                else:
+                    tname = self.mem.read_wstring(team_ptr + TEAM_NAME_OFFSET, TEAM_NAME_LENGTH)
+                    tname = (tname or "").strip()
+                    if tname and all(32 <= ord(c) <= 126 for c in tname):
+                        tid = team_id_counter
+                        team_id_counter += 1
+                        team_cache[team_ptr] = (tname, tid)
+                        player.team_name = tname
+                        player.team_id = tid
+                    else:
+                        team_cache[team_ptr] = ("Free Agent", -2)
+                        player.team_name = "Free Agent"
+                        player.team_id = -2
+
             # 读取综合评分
             ovr_attr = self.config.get_attribute("综合评分")
             if ovr_attr:
@@ -184,6 +201,8 @@ class PlayerManager:
 
             players.append(player)
 
+        # Store discovered teams for the UI
+        self._discovered_teams = {tid: name for name, tid in team_cache.values() if tid >= 0}
         self.players = players
         return players
 
