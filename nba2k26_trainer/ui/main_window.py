@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QFont
 
-from ..core.process import attach_to_game, is_process_running, launch_game_without_eac, restore_eac_dll, _find_game_exe, _get_game_dir
+from ..core.process import attach_to_game, is_process_running
 from ..core.offsets import initialize_offsets, get_offsets, get_default_offsets_path, OffsetConfig
 from ..core.memory import GameMemory
 from ..models.player import Player, PlayerManager
@@ -79,11 +79,11 @@ class MainWindow(QMainWindow):
         self.btn_connect.clicked.connect(self._connect_game)
         toolbar.addWidget(self.btn_connect)
 
-        self.btn_launch = QPushButton("Launch (No EAC)")
-        self.btn_launch.setObjectName("btn_max")
-        self.btn_launch.setToolTip("Launch NBA2K26.exe directly without EasyAntiCheat (offline mode)")
-        self.btn_launch.clicked.connect(self._launch_no_eac)
-        toolbar.addWidget(self.btn_launch)
+        self.btn_guide = QPushButton("How to Launch")
+        self.btn_guide.setObjectName("btn_max")
+        self.btn_guide.setToolTip("Show instructions for launching without EAC")
+        self.btn_guide.clicked.connect(self._show_launch_guide)
+        toolbar.addWidget(self.btn_guide)
 
         self.btn_refresh = QPushButton("Refresh Players")
         self.btn_refresh.setObjectName("btn_refresh")
@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
         self.statusbar.showMessage(
-            "Ready - Launch game with [Launch (No EAC)] or start NBA2K26.exe directly, then [Connect Game]"
+            "Ready - Launch game WITHOUT EAC from Steam, then click [Connect Game]. Click [How to Launch] for help."
         )
 
     def _setup_timer(self):
@@ -157,26 +157,24 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Connection Failed",
                 "NBA2K26.exe process not found.\n\n"
-                "Please:\n"
-                "1. Start NBA 2K26 first\n"
-                "2. Use [Launch (No EAC)] button to start without anti-cheat\n"
-                "3. Run this tool as Administrator"
+                "Please start NBA 2K26 first.\n"
+                "Click [How to Launch] for instructions on launching without EAC."
             )
         elif status in ("EAC_BLOCKED", "MEMORY_ACCESS_DENIED"):
-            reply = QMessageBox.warning(
+            QMessageBox.warning(
                 self, "EasyAntiCheat Blocked Memory Access",
                 "Game found but memory access is BLOCKED by EasyAntiCheat.\n\n"
-                "EAC prevents external tools from reading/writing game memory.\n"
-                "All community editors (discobisco, Young1996, etc.) have the same limitation.\n\n"
-                "Solution: Launch NBA2K26.exe directly without EAC.\n"
-                "This enables offline mode only (MyNBA/MyGM still works offline).\n\n"
-                "Click [Yes] to close current game and relaunch without EAC.\n"
-                "Click [No] to cancel.",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
+                "You need to restart the game WITHOUT EAC:\n\n"
+                "1. Close NBA 2K26 completely\n"
+                "2. In Steam, click Play on NBA 2K26\n"
+                "3. In the popup dialog, select the SECOND option:\n"
+                '   "Play without Anti-Cheat (Offline)"\n'
+                "4. Wait for game to load into MyNBA/MyGM\n"
+                "5. Come back here and click [Connect Game]\n\n"
+                "NOTE: You may also need to disconnect from the internet\n"
+                "before selecting the offline option.\n\n"
+                "Click [How to Launch] for detailed instructions."
             )
-            if reply == QMessageBox.Yes:
-                self._launch_no_eac()
         elif status == "OPEN_FAILED":
             QMessageBox.warning(
                 self, "Connection Failed",
@@ -184,46 +182,35 @@ class MainWindow(QMainWindow):
                 "Please run this tool as Administrator."
             )
 
-    def _launch_no_eac(self):
-        """Kill game + stop EAC service + relaunch game directly"""
-        self.statusbar.showMessage("Stopping EAC and relaunching game ...")
-        self.btn_launch.setEnabled(False)
-        self.btn_connect.setEnabled(False)
-
-        # Force UI update before blocking operations
-        from PyQt5.QtWidgets import QApplication as _QApp
-        _QApp.processEvents()
-
-        success, msg = launch_game_without_eac()
-
-        self.btn_launch.setEnabled(True)
-        self.btn_connect.setEnabled(True)
-
-        if success:
-            self.statusbar.showMessage(
-                "Game launched without EAC - Wait for game to load, then click [Connect Game]"
-            )
-            QMessageBox.information(
-                self, "Game Launched (No EAC)",
-                f"NBA2K26.exe launched WITHOUT EasyAntiCheat.\n\n"
-                f"Steps:\n"
-                f"  {msg}\n\n"
-                "Wait for the game to fully load into MyNBA/MyGM mode,\n"
-                "then click [Connect Game].\n\n"
-                "NOTE: Online features will not work without EAC."
-            )
-        else:
-            self.statusbar.showMessage("Launch failed")
-            QMessageBox.critical(
-                self, "Launch Failed",
-                f"Failed to launch game without EAC.\n\n"
-                f"Details: {msg}\n\n"
-                "Try manually:\n"
-                "1. Close NBA 2K26 completely\n"
-                "2. Open Services (services.msc) and stop EasyAntiCheat\n"
-                "3. Run NBA2K26.exe directly (NOT start_protected_game.exe)\n"
-                "4. Then click [Connect Game]"
-            )
+    def _show_launch_guide(self):
+        """Show instructions for launching without EAC"""
+        QMessageBox.information(
+            self, "How to Launch NBA 2K26 Without EAC",
+            "=== Launch Guide (Required for Roster Editing) ===\n\n"
+            "All roster editors require launching WITHOUT EasyAntiCheat.\n"
+            "This is a Steam built-in feature, not a hack.\n\n"
+            "STEPS:\n\n"
+            "1. Close NBA 2K26 if it is running\n\n"
+            "2. (Recommended) Disconnect your PC from the internet\n"
+            "   - This prevents EAC from interfering in offline mode\n\n"
+            "3. In Steam Library, click PLAY on NBA 2K26\n\n"
+            "4. A popup dialog will appear with TWO options:\n"
+            '   - Option 1: "Play Game" (with EAC, online)\n'
+            '   - Option 2: "Play without Anti-Cheat" (offline)\n'
+            "   >>> SELECT OPTION 2 <<<\n\n"
+            "5. Wait for game to fully load\n"
+            "   - Enter MyNBA or MyGM mode\n"
+            "   - Load your save file\n\n"
+            "6. Come back to this Trainer\n"
+            "   - Click [Connect Game]\n"
+            "   - Select a player and start editing!\n\n"
+            "=== NOTES ===\n"
+            "- Online modes will NOT work without EAC\n"
+            "- MyNBA / MyGM / Play Now all work offline\n"
+            "- All community editors use this same method\n"
+            "- If no popup appears, right-click the game in Steam\n"
+            "  > Properties > General > Launch Options"
+        )
 
     def _refresh_players(self):
         if self.player_mgr is None:
@@ -282,8 +269,4 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.mem:
             self.mem.close()
-        # Restore EAC DLL so Steam can launch normally next time
-        exe = _find_game_exe()
-        if exe:
-            restore_eac_dll(_get_game_dir(exe))
         event.accept()
