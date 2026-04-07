@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Any
 
 from ..core.memory import GameMemory
 from ..core.offsets import OffsetConfig, AttributeDef
+from ..core.scanner import scan_for_player_table, scan_for_base_pointer
 
 
 @dataclass
@@ -65,33 +66,76 @@ class PlayerManager:
         self.players: List[Player] = []
         self._table_base: Optional[int] = None
 
-    def _resolve_table_base(self) -> Optional[int]:
-        """解析球员表基地址"""
+    def _resolve_table_base(self, progress_callback=None) -> Optional[int]:
+        """解析球员表基地址 - 先尝试配置的指针，失败后动态扫描"""
+        if self._table_base is not None:
+            return self._table_base
+
         pt = self.config.player_table
 
+        # Method 1: configured pointer (RVA from module base)
         if pt.direct_table and pt.base_pointer > 0:
-            # 直接表寻址：基址指针指向球员表起始位置
-            # 需要从游戏进程内存中读取该指针指向的地址
             table_ptr = self.mem.read_uint64(self.mem.base_address + pt.base_pointer)
             if table_ptr and table_ptr != 0:
-                return table_ptr
-            # 如果从模块基址偏移读取失败，尝试直接使用绝对地址
+                # Validate it looks like a real player table
+                if self._validate_table_ptr(table_ptr):
+                    return table_ptr
+            # Try absolute address
             table_ptr = self.mem.read_uint64(pt.base_pointer)
             if table_ptr and table_ptr != 0:
-                return table_ptr
-            return None
+                if self._validate_table_ptr(table_ptr):
+                    return table_ptr
 
+        # Method 2: pointer chain
         if pt.pointer_offsets:
             base = self.mem.resolve_pointer_chain(
                 self.mem.base_address, pt.pointer_offsets
             )
-            return base
+            if base and self._validate_table_ptr(base):
+                return base
 
-        return None
+        # Method 3: Dynamic memory scan (fallback)
+        if progress_callback:
+            progress_callback("Config pointer failed, scanning memory for player table...")
+        table_base = scan_for_player_table(
+            self.mem,
+            stride=pt.stride,
+            last_name_offset=pt.last_name_offset,
+            first_name_offset=pt.first_name_offset,
+            name_max_chars=pt.name_string_length,
+            max_players=pt.max_players,
+            progress_callback=progress_callback,
+        )
+        if table_base is not None:
+            # Try to find the pointer RVA for future use
+            new_rva = scan_for_base_pointer(
+                self.mem, table_base, self.mem.base_address
+            )
+            if new_rva is not None and progress_callback:
+                progress_callback(
+                    f"Found new base_pointer RVA: 0x{new_rva:X} ({new_rva}). "
+                    f"Update config/offsets_2k26.json base_pointer to {new_rva}."
+                )
+        return table_base
 
-    def scan_players(self) -> List[Player]:
+    def _validate_table_ptr(self, table_ptr: int) -> bool:
+        """Quick validation: check if first few records have valid player names"""
+        pt = self.config.player_table
+        valid = 0
+        for i in range(min(6, pt.max_players)):
+            record = table_ptr + i * pt.stride
+            last = self.mem.read_wstring(record + pt.last_name_offset, pt.name_string_length)
+            first = self.mem.read_wstring(record + pt.first_name_offset, pt.name_string_length)
+            last = (last or "").strip()
+            first = (first or "").strip()
+            if last and first and len(last) >= 2 and len(first) >= 2:
+                if all(32 <= ord(c) <= 126 for c in last + first):
+                    valid += 1
+        return valid >= 2
+
+    def scan_players(self, progress_callback=None) -> List[Player]:
         """扫描内存中的球员列表"""
-        self._table_base = self._resolve_table_base()
+        self._table_base = self._resolve_table_base(progress_callback)
         if self._table_base is None:
             return []
 

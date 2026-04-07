@@ -6,7 +6,7 @@
 
   "player_table": {
     "base_pointer": 131015096,
-    "base_pointer_hex": "0x7CF8008",
+    "base_pointer_hex": "0x7CF21B8",
     "pointer_offsets": [],
     "stride": 1176,
     "stride_hex": "0x498",

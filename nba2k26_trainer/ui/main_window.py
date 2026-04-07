@@ -215,11 +215,87 @@ class MainWindow(QMainWindow):
     def _refresh_players(self):
         if self.player_mgr is None:
             return
+
         self.statusbar.showMessage("Scanning player data ...")
-        self.players = self.player_mgr.scan_players()
+        self.btn_refresh.setEnabled(False)
+        from PyQt5.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        # Reset cached table base so it re-scans
+        self.player_mgr._table_base = None
+
+        def progress(msg):
+            self.statusbar.showMessage(msg)
+            QApplication.processEvents()
+
+        self.players = self.player_mgr.scan_players(progress_callback=progress)
         self._player_index_map = {p.index: p for p in self.players}
         self.player_list.set_players(self.players)
-        self.statusbar.showMessage(f"Loaded {len(self.players)} players")
+
+        self.btn_refresh.setEnabled(True)
+
+        if len(self.players) == 0:
+            debug_info = self._debug_table_scan()
+            QMessageBox.warning(
+                self, "No Players Found",
+                f"Cannot find players in game memory.\n\n"
+                f"Module base: 0x{self.mem.base_address:X}\n"
+                f"Config pointer: 0x{self.config.player_table.base_pointer:X}\n\n"
+                f"Debug info:\n{debug_info}\n\n"
+                "Make sure you are in MyNBA/MyGM mode with a roster loaded.\n"
+                "The game must be past the main menu."
+            )
+        else:
+            base = self.player_mgr._table_base
+            base_str = f"0x{base:X}" if base else "unknown"
+            self.statusbar.showMessage(
+                f"Loaded {len(self.players)} players (table base: {base_str})"
+            )
+
+    def _debug_table_scan(self) -> str:
+        """Collect debug info about table scanning"""
+        lines = []
+        mem = self.mem
+        pt = self.config.player_table
+
+        # Try multiple pointer interpretations
+        addr_rva = mem.base_address + pt.base_pointer
+        addr_abs = pt.base_pointer
+
+        val_rva = mem.read_uint64(addr_rva)
+        val_abs = mem.read_uint64(addr_abs)
+
+        lines.append(f"base+ptr (0x{addr_rva:X}): {f'0x{val_rva:X}' if val_rva else 'FAIL'}")
+        lines.append(f"abs ptr  (0x{addr_abs:X}): {f'0x{val_abs:X}' if val_abs else 'FAIL'}")
+
+        # Try reading names from each resolved address
+        for label, table_val in [("base+ptr", val_rva), ("abs_ptr", val_abs)]:
+            if not table_val or table_val == 0:
+                continue
+            # Direct read
+            for i in range(3):
+                rec = table_val + i * pt.stride
+                last = mem.read_wstring(rec + pt.last_name_offset, pt.name_string_length)
+                first = mem.read_wstring(rec + pt.first_name_offset, pt.name_string_length)
+                if first or last:
+                    lines.append(f"  {label}[{i}]: {first} {last}")
+                    break
+            else:
+                # Try double deref
+                val2 = mem.read_uint64(table_val)
+                if val2 and 0x10000 < val2 < 0x7FFFFFFFFFFF:
+                    for i in range(3):
+                        rec = val2 + i * pt.stride
+                        last = mem.read_wstring(rec + pt.last_name_offset, pt.name_string_length)
+                        first = mem.read_wstring(rec + pt.first_name_offset, pt.name_string_length)
+                        if first or last:
+                            lines.append(f"  {label}->deref (0x{val2:X})[{i}]: {first} {last}")
+                            break
+                    else:
+                        raw = mem.read_bytes(val2, 40)
+                        lines.append(f"  {label}->deref (0x{val2:X}): raw={raw[:20].hex() if raw else 'FAIL'}")
+
+        return "\n".join(lines) if lines else "No data"
 
     def _on_player_selected(self, player_index: int):
         player = self._player_index_map.get(player_index)
