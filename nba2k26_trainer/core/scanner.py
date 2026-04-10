@@ -3,73 +3,9 @@
 import ctypes
 import ctypes.wintypes as wt
 import struct
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from .memory import GameMemory, kernel32
-
-
-# ============================================================
-# AOB Pattern Scanning
-# ============================================================
-
-def parse_pattern(pattern: str) -> tuple[bytes, bytes]:
-    """解析特征码字符串为 (pattern_bytes, mask_bytes)"""
-    tokens = pattern.strip().split()
-    pattern_bytes = bytearray()
-    mask_bytes = bytearray()
-    for token in tokens:
-        if token == "??" or token == "?":
-            pattern_bytes.append(0)
-            mask_bytes.append(0)
-        else:
-            pattern_bytes.append(int(token, 16))
-            mask_bytes.append(0xFF)
-    return bytes(pattern_bytes), bytes(mask_bytes)
-
-
-def scan_memory(mem: GameMemory, start: int, size: int,
-                pattern: str, max_results: int = 1) -> List[int]:
-    """在内存范围内搜索特征码"""
-    pat, mask = parse_pattern(pattern)
-    pat_len = len(pat)
-    results = []
-
-    chunk_size = 0x10000
-    overlap = pat_len - 1
-
-    offset = 0
-    while offset < size and len(results) < max_results:
-        read_size = min(chunk_size + overlap, size - offset)
-        data = mem.read_bytes(start + offset, read_size)
-        if not data:
-            offset += chunk_size
-            continue
-
-        for i in range(len(data) - pat_len + 1):
-            match = True
-            for j in range(pat_len):
-                if mask[j] != 0 and data[i + j] != pat[j]:
-                    match = False
-                    break
-            if match:
-                addr = start + offset + i
-                results.append(addr)
-                if len(results) >= max_results:
-                    break
-
-        offset += chunk_size
-
-    return results
-
-
-def resolve_rip_relative(mem: GameMemory, instruction_addr: int,
-                          rip_offset_pos: int = 3, instr_len: int = 7) -> Optional[int]:
-    """解析 RIP 相对寻址指令"""
-    data = mem.read_bytes(instruction_addr + rip_offset_pos, 4)
-    if not data or len(data) < 4:
-        return None
-    rip_offset = struct.unpack("<i", data)[0]
-    return instruction_addr + instr_len + rip_offset
 
 
 # ============================================================
@@ -77,6 +13,7 @@ def resolve_rip_relative(mem: GameMemory, instruction_addr: int,
 # ============================================================
 
 MEM_COMMIT = 0x1000
+MEM_IMAGE = 0x1000000
 PAGE_READONLY = 0x02
 PAGE_READWRITE = 0x04
 PAGE_WRITECOPY = 0x08
@@ -130,7 +67,7 @@ def enum_readable_regions(handle: int,
                 mbi.Protect in READABLE_PROTECTS and
                 mbi.RegionSize > 0):
             base = mbi.BaseAddress if mbi.BaseAddress else addr
-            regions.append((base, mbi.RegionSize))
+            regions.append((base, mbi.RegionSize, mbi.Type))
 
         addr = (mbi.BaseAddress or addr) + mbi.RegionSize
         if addr <= (mbi.BaseAddress or 0):
@@ -140,49 +77,195 @@ def enum_readable_regions(handle: int,
 
 
 # ============================================================
-# Dynamic Player Table Scanner
+# Helpers
 # ============================================================
 
-# Well-known player names that should exist in any NBA 2K26 roster
-# Using last names since they're at offset 0 in the record
-KNOWN_LAST_NAMES = [
-    "James", "Curry", "Durant", "Antetokounmpo", "Jokic",
-    "Doncic", "Tatum", "Edwards", "Wembanyama", "Morant",
-    "Davis", "Butler", "Embiid", "Booker", "Mitchell",
-    "Brown", "Young", "Lillard", "George", "Leonard",
-]
-
-KNOWN_FIRST_NAMES = [
-    "LeBron", "Stephen", "Kevin", "Giannis", "Nikola",
-    "Luka", "Jayson", "Anthony", "Victor", "Ja",
-]
-
-
-def _encode_wstring(text: str) -> bytes:
-    """Encode string as UTF-16LE with null terminator"""
-    return text.encode("utf-16-le") + b"\x00\x00"
-
-
-def _is_printable_ascii(text: str) -> bool:
-    """Check if string contains only printable ASCII"""
-    return all(32 <= ord(c) <= 126 for c in text)
-
-
-def _read_wstring_from_buf(buf: bytes, offset: int, max_chars: int) -> str:
-    """Read a wstring from a buffer"""
-    byte_len = max_chars * 2
-    end = offset + byte_len
-    if end > len(buf):
+def _read_wstring_safe(mem: GameMemory, address: int, max_chars: int) -> str:
+    """Read wstring with proper null termination"""
+    data = mem.read_bytes(address, max_chars * 2)
+    if not data:
         return ""
-    raw = buf[offset:end]
+    for i in range(0, len(data) - 1, 2):
+        if data[i] == 0 and data[i + 1] == 0:
+            data = data[:i]
+            break
     try:
-        text = raw.decode("utf-16-le", errors="ignore")
+        return data.decode("utf-16-le", errors="ignore").strip()
     except Exception:
         return ""
-    null = text.find("\x00")
-    if null != -1:
-        text = text[:null]
-    return text
+
+
+def _is_ascii_name(text: str) -> bool:
+    """Check if string looks like a real player name (ASCII letters, spaces, etc)"""
+    if not text or len(text) < 2:
+        return False
+    for c in text:
+        o = ord(c)
+        if o < 32 or o > 126:
+            return False
+    # Must contain at least one letter
+    return any(c.isalpha() for c in text)
+
+
+def _validate_as_player_table(mem: GameMemory, base: int, stride: int,
+                                last_name_off: int, first_name_off: int,
+                                name_chars: int, ovr_offset: int,
+                                check_count: int) -> Tuple[int, int]:
+    """Validate a candidate player table base.
+    Returns (valid_name_count, valid_ovr_count)"""
+    valid_names = 0
+    valid_ovr = 0
+    for i in range(check_count):
+        rec = base + i * stride
+        last = _read_wstring_safe(mem, rec + last_name_off, name_chars)
+        first = _read_wstring_safe(mem, rec + first_name_off, name_chars)
+
+        if not _is_ascii_name(last) or not _is_ascii_name(first):
+            continue
+        valid_names += 1
+
+        # Check OVR is in sane range (25-99 for real players)
+        ovr = mem.read_uint8(rec + ovr_offset)
+        if ovr is not None and 25 <= ovr <= 99:
+            valid_ovr += 1
+
+    return valid_names, valid_ovr
+
+
+# ============================================================
+# Method 1: Pointer Table Scan
+# Scan the game's .data section for pointers to valid player tables
+# ============================================================
+
+def scan_pointer_table(mem: GameMemory,
+                        module_base: int,
+                        stride: int = 1176,
+                        last_name_off: int = 0,
+                        first_name_off: int = 40,
+                        name_chars: int = 20,
+                        ovr_offset: int = 61,
+                        progress_callback=None) -> Optional[int]:
+    """Scan the game module's data sections for a pointer to the player table.
+
+    The game stores a pointer to the player table somewhere in its .data section.
+    We scan every 8-byte aligned uint64 in the module image, and for each value
+    that looks like a valid heap pointer, we check if it points to a player table.
+    """
+    regions = enum_readable_regions(mem.handle)
+
+    # Find regions that belong to the main module image
+    # (AllocationBase == module_base, Type == MEM_IMAGE)
+    module_regions = []
+    for base, size, mtype in regions:
+        if mtype == MEM_IMAGE and base >= module_base and base < module_base + 0x20000000:
+            module_regions.append((base, size))
+
+    if not module_regions and progress_callback:
+        progress_callback(f"No module regions found at base 0x{module_base:X}, trying all regions...")
+
+    # If no image regions found, try scanning near the module base
+    if not module_regions:
+        for base, size, mtype in regions:
+            if module_base <= base < module_base + 0x20000000:
+                module_regions.append((base, size))
+
+    total_size = sum(s for _, s in module_regions)
+    if progress_callback:
+        progress_callback(f"Scanning {len(module_regions)} module regions ({total_size // 1024 // 1024}MB) for player table pointer...")
+
+    best_candidate = None
+    best_score = 0
+
+    scanned = 0
+    for region_base, region_size in module_regions:
+        # Read the region in chunks
+        chunk_size = 0x100000  # 1MB
+        for offset in range(0, region_size, chunk_size):
+            read_size = min(chunk_size, region_size - offset)
+            addr = region_base + offset
+            data = mem.read_bytes(addr, read_size)
+            if not data:
+                continue
+
+            scanned += read_size
+
+            # Scan for uint64 values that look like heap pointers
+            for i in range(0, len(data) - 7, 8):
+                ptr = struct.unpack_from("<Q", data, i)[0]
+
+                # Must look like a valid pointer (in user-space heap range)
+                if ptr < 0x10000 or ptr > 0x7FFFFFFFFFFF:
+                    continue
+                # Skip pointers into the module itself (those are code/data, not heap)
+                if module_base <= ptr < module_base + 0x20000000:
+                    continue
+
+                # Quick check: can we read at this address?
+                test = mem.read_bytes(ptr, 4)
+                if not test:
+                    continue
+
+                # Check if this pointer leads to a player table
+                names, ovrs = _validate_as_player_table(
+                    mem, ptr, stride, last_name_off, first_name_off,
+                    name_chars, ovr_offset, 10
+                )
+
+                if names >= 5 and ovrs >= 3:
+                    # Promising! Do a deeper check
+                    names2, ovrs2 = _validate_as_player_table(
+                        mem, ptr, stride, last_name_off, first_name_off,
+                        name_chars, ovr_offset, 50
+                    )
+                    score = names2 + ovrs2
+                    rva = (addr + i) - module_base
+                    if progress_callback:
+                        progress_callback(
+                            f"Candidate at RVA 0x{rva:X}: ptr=0x{ptr:X}, "
+                            f"{names2} names, {ovrs2} valid OVR"
+                        )
+                    if score > best_score:
+                        best_score = score
+                        best_candidate = ptr
+                        # If we found a really good match, stop early
+                        if names2 >= 30 and ovrs2 >= 20:
+                            if progress_callback:
+                                progress_callback(
+                                    f"Found player table at 0x{ptr:X} "
+                                    f"(RVA 0x{rva:X}, {names2} names, {ovrs2} OVR)"
+                                )
+                            return best_candidate
+
+            if progress_callback and scanned % (chunk_size * 10) == 0:
+                pct = scanned * 100 // max(total_size, 1)
+                progress_callback(f"Scanning module data... {pct}%")
+
+    return best_candidate
+
+
+# ============================================================
+# Method 2: Name-based scan (fallback)
+# Search all memory for known player name pairs
+# ============================================================
+
+# Known player name PAIRS (last, first) - must match to avoid false positives
+KNOWN_PLAYERS = [
+    ("James", "LeBron"),
+    ("Curry", "Stephen"),
+    ("Durant", "Kevin"),
+    ("Jokic", "Nikola"),
+    ("Doncic", "Luka"),
+    ("Tatum", "Jayson"),
+    ("Wembanyama", "Victor"),
+    ("Antetokounmpo", "Giannis"),
+    ("Edwards", "Anthony"),
+    ("Embiid", "Joel"),
+    ("Davis", "Anthony"),
+    ("Booker", "Devin"),
+    ("Morant", "Ja"),
+    ("Butler", "Jimmy"),
+    ("Lillard", "Damian"),
+]
 
 
 def scan_for_player_table(mem: GameMemory,
@@ -191,211 +274,148 @@ def scan_for_player_table(mem: GameMemory,
                            first_name_offset: int = 40,
                            name_max_chars: int = 20,
                            max_players: int = 600,
+                           ovr_offset: int = 61,
                            progress_callback=None) -> Optional[int]:
-    """动态扫描内存寻找球员表基地址
-
-    Strategy:
-    1. Search all readable memory for UTF-16LE encoded known player last names
-    2. For each hit, check if it aligns as a player record (valid first name at offset 40)
-    3. Walk backwards to find the table start
-    4. Validate by checking multiple records at the expected stride
-
-    Returns: table base address, or None if not found
+    """Search all readable memory for known player name pairs.
+    Much stricter than before - requires matching first+last name pair.
     """
-    # Build search patterns for last names
-    search_patterns = []
-    for name in KNOWN_LAST_NAMES[:10]:  # Use top 10
-        pattern = _encode_wstring(name)
-        search_patterns.append((name, pattern))
-
-    # Get readable memory regions
     regions = enum_readable_regions(mem.handle)
     if progress_callback:
-        progress_callback(f"Scanning {len(regions)} memory regions...")
+        progress_callback(f"Name scan: {len(regions)} memory regions...")
 
-    candidates = []  # (table_base, valid_count)
+    best_candidate = None
+    best_score = 0
 
-    for region_idx, (region_base, region_size) in enumerate(regions):
-        # Skip tiny regions and kernel-space-looking addresses
-        if region_size < stride * 10:
-            continue
-        if region_base > 0x7FFFFFFFFFFF:
-            continue
+    for last_name, first_name in KNOWN_PLAYERS[:8]:
+        pattern = last_name.encode("utf-16-le")
 
-        # Read region in chunks
-        chunk_size = min(region_size, 0x400000)  # 4MB chunks
-        for chunk_offset in range(0, region_size, chunk_size):
-            actual_size = min(chunk_size, region_size - chunk_offset)
-            chunk_addr = region_base + chunk_offset
-            data = mem.read_bytes(chunk_addr, actual_size)
-            if not data:
+        for region_base, region_size, _ in regions:
+            if region_size < stride * 10:
                 continue
 
-            # Search for each known name in this chunk
-            for name, pattern in search_patterns:
-                pat_len = len(pattern)
-                search_start = 0
+            chunk_size = min(region_size, 0x400000)
+            for chunk_off in range(0, region_size, chunk_size):
+                actual = min(chunk_size, region_size - chunk_off)
+                chunk_addr = region_base + chunk_off
+                data = mem.read_bytes(chunk_addr, actual)
+                if not data:
+                    continue
+
+                search_pos = 0
                 while True:
-                    idx = data.find(pattern, search_start)
+                    idx = data.find(pattern, search_pos)
                     if idx == -1:
                         break
-                    search_start = idx + 2  # Move past for next search
+                    search_pos = idx + 2
 
-                    # Found a name match at chunk_addr + idx
                     hit_addr = chunk_addr + idx
-
-                    # Check if this could be a last_name field (at last_name_offset from record start)
                     record_addr = hit_addr - last_name_offset
 
-                    # Verify: read first name from the same record
-                    first_name_addr = record_addr + first_name_offset
-                    first_name_in_buf = idx - last_name_offset + first_name_offset
-                    if 0 <= first_name_in_buf < len(data) - name_max_chars * 2:
-                        first = _read_wstring_from_buf(data, first_name_in_buf, name_max_chars)
-                    else:
-                        first = mem.read_wstring(first_name_addr, name_max_chars)
-                        if first is None:
-                            continue
-
-                    first = first.strip()
-                    if not first or not _is_printable_ascii(first):
-                        continue
-                    if len(first) < 2:
+                    # Must have the matching first name at first_name_offset
+                    first_read = _read_wstring_safe(mem, record_addr + first_name_offset, name_max_chars)
+                    if first_read != first_name:
                         continue
 
-                    # This looks like a valid player record!
-                    # Now find the table base by walking backwards
-                    table_base = _find_table_start(
-                        mem, record_addr, stride,
-                        last_name_offset, first_name_offset,
-                        name_max_chars, max_players
+                    # MATCHED a known player name pair!
+                    if progress_callback:
+                        progress_callback(f"Found {first_name} {last_name} at 0x{record_addr:X}")
+
+                    # Walk back to find table start
+                    table_base = record_addr
+                    for _ in range(max_players):
+                        prev = table_base - stride
+                        pl = _read_wstring_safe(mem, prev + last_name_offset, name_max_chars)
+                        pf = _read_wstring_safe(mem, prev + first_name_offset, name_max_chars)
+                        if not _is_ascii_name(pl) and not _is_ascii_name(pf):
+                            # Check one more back
+                            pl2 = _read_wstring_safe(mem, prev - stride + last_name_offset, name_max_chars)
+                            if not _is_ascii_name(pl2):
+                                break
+                        table_base = prev
+
+                    # Validate with OVR check
+                    names, ovrs = _validate_as_player_table(
+                        mem, table_base, stride, last_name_offset,
+                        first_name_offset, name_max_chars, ovr_offset, 50
                     )
-                    if table_base is not None:
-                        # Validate the table base
-                        valid_count = _validate_table(
-                            mem, table_base, stride,
-                            last_name_offset, first_name_offset,
-                            name_max_chars, min(50, max_players)
+                    score = names + ovrs
+
+                    if progress_callback:
+                        progress_callback(
+                            f"Table at 0x{table_base:X}: {names} names, {ovrs} valid OVR"
                         )
-                        if valid_count >= 10:
-                            candidates.append((table_base, valid_count))
-                            if progress_callback:
-                                progress_callback(
-                                    f"Found candidate table at 0x{table_base:X} "
-                                    f"({valid_count} valid players)"
-                                )
 
-                    # Don't search more occurrences of this name
-                    break
+                    if score > best_score and names >= 10 and ovrs >= 5:
+                        best_score = score
+                        best_candidate = table_base
 
-        # Early exit if we found a good candidate
-        if candidates and candidates[-1][1] >= 30:
+                    if best_score >= 60:
+                        return best_candidate
+
+                    break  # Don't search more occurrences
+
+        if best_score >= 40:
             break
 
-    if not candidates:
-        return None
-
-    # Return the candidate with the most valid players
-    candidates.sort(key=lambda x: x[1], reverse=True)
-    return candidates[0][0]
+    return best_candidate
 
 
-def _find_table_start(mem: GameMemory, known_record: int, stride: int,
-                       last_name_offset: int, first_name_offset: int,
-                       name_max_chars: int, max_players: int) -> Optional[int]:
-    """从已知的球员记录地址向前回溯，找到球员表起始位置"""
-    # Walk backwards from known record
-    current = known_record
-    max_back = min(max_players, 600)
+# ============================================================
+# Combined scan: try all methods
+# ============================================================
 
-    for step in range(max_back):
-        prev = current - stride
-        # Check if previous record has a valid name
-        last = mem.read_wstring(prev + last_name_offset, name_max_chars)
-        first = mem.read_wstring(prev + first_name_offset, name_max_chars)
+def find_player_table(mem: GameMemory,
+                       module_base: int,
+                       stride: int = 1176,
+                       last_name_off: int = 0,
+                       first_name_off: int = 40,
+                       name_chars: int = 20,
+                       ovr_offset: int = 61,
+                       max_players: int = 600,
+                       progress_callback=None) -> Optional[int]:
+    """Combined player table search using multiple methods.
 
-        if last is None and first is None:
-            # Can't read memory - we've gone too far
-            break
+    1. First: scan module data sections for a pointer to the player table (fastest, most reliable)
+    2. Fallback: search all memory for known player name pairs
+    """
+    # Method 1: Pointer scan in module
+    if progress_callback:
+        progress_callback("Method 1: Scanning module for player table pointer...")
+    result = scan_pointer_table(
+        mem, module_base, stride, last_name_off, first_name_off,
+        name_chars, ovr_offset, progress_callback
+    )
+    if result:
+        return result
 
-        last = (last or "").strip()
-        first = (first or "").strip()
+    # Method 2: Name pair scan
+    if progress_callback:
+        progress_callback("Method 2: Searching for known player names...")
+    result = scan_for_player_table(
+        mem, stride, last_name_off, first_name_off, name_chars,
+        max_players, ovr_offset, progress_callback
+    )
+    if result:
+        return result
 
-        if not last and not first:
-            # Empty record - might be start of table or gap
-            # Check one more back
-            prev2 = prev - stride
-            last2 = mem.read_wstring(prev2 + last_name_offset, name_max_chars)
-            first2 = mem.read_wstring(prev2 + first_name_offset, name_max_chars)
-            last2 = (last2 or "").strip()
-            first2 = (first2 or "").strip()
-            if not last2 and not first2:
-                # Two empty records - this is likely the start
-                break
-            # Single gap, keep going
-            current = prev
-            continue
-
-        if not _is_printable_ascii(last + first):
-            break
-
-        current = prev
-
-    return current
-
-
-def _validate_table(mem: GameMemory, table_base: int, stride: int,
-                     last_name_offset: int, first_name_offset: int,
-                     name_max_chars: int, check_count: int) -> int:
-    """验证球员表：统计有效球员记录数量"""
-    valid = 0
-    for i in range(check_count):
-        record = table_base + i * stride
-        last = mem.read_wstring(record + last_name_offset, name_max_chars)
-        first = mem.read_wstring(record + first_name_offset, name_max_chars)
-
-        last = (last or "").strip()
-        first = (first or "").strip()
-
-        if not last and not first:
-            continue
-
-        if not _is_printable_ascii(last + first):
-            continue
-
-        if len(last) >= 2 or len(first) >= 2:
-            valid += 1
-
-    return valid
+    if progress_callback:
+        progress_callback("All scan methods failed.")
+    return None
 
 
 def scan_for_base_pointer(mem: GameMemory, table_base: int,
                            module_base: int, image_size: int = 0x10000000) -> Optional[int]:
-    """找到球员表基地址后，反向搜索指向该地址的指针（用于更新配置）
-
-    在模块的 .data/.rdata 段中搜索存储了 table_base 值的地址
-    """
+    """Find the RVA of a pointer to table_base within the module image."""
     target_bytes = struct.pack("<Q", table_base)
+    scan_size = min(image_size, 0x10000000)
 
-    # Scan the module's data sections (typically after .text)
-    # Start from module_base + some offset to skip code section
-    scan_start = module_base
-    scan_size = min(image_size, 0x10000000)  # Cap at 256MB
-
-    results = []
-    chunk_size = 0x100000  # 1MB
+    chunk_size = 0x100000
     for offset in range(0, scan_size, chunk_size):
-        data = mem.read_bytes(scan_start + offset, min(chunk_size, scan_size - offset))
+        data = mem.read_bytes(module_base + offset, min(chunk_size, scan_size - offset))
         if not data:
             continue
-        idx = 0
-        while True:
-            idx = data.find(target_bytes, idx)
-            if idx == -1:
-                break
-            found_addr = scan_start + offset + idx
-            rva = found_addr - module_base
-            results.append((found_addr, rva))
-            idx += 8
+        idx = data.find(target_bytes)
+        if idx != -1:
+            return offset + idx  # Return RVA
 
-    return results[0][1] if results else None  # Return RVA
+    return None

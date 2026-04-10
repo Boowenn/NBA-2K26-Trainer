@@ -1,103 +1,185 @@
-# NBA 2K26 Trainer - 球员属性修改器
+# NBA 2K26 Trainer
 
-一款基于 Python + PyQt5 的 NBA 2K26 经理模式球员属性修改器，通过读写游戏进程内存实现实时修改。
+A real-time player attribute editor for NBA 2K26 MyNBA / MyGM mode. Modify any player's ratings, badges, tendencies, contracts, and more — all live in memory while the game is running.
 
-## 功能特性
+![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
+![PyQt5](https://img.shields.io/badge/GUI-PyQt5-green?logo=qt)
+![Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-- **球员浏览** — 扫描游戏内存中的球员列表，支持按姓名搜索和球队筛选
-- **全属性编辑** — 修改球员的所有属性，包括：
-  - 基本信息：年龄、身高、体重、位置、球衣号码
-  - 进攻能力：投篮、控球、传球、扣篮等
-  - 防守能力：内线防守、外线防守、抢断、盖帽等
-  - 体能属性：速度、力量、弹跳、耐力等
-  - 篮球智商：进攻/防守意识
-  - 潜力与成长：潜力值、巅峰年龄、发展特质
-  - 合同：年薪、合同年限
-  - 徽章：所有徽章等级（无/铜/银/金/名人堂）
-  - 热区：所有区域投篮热区等级
-  - 倾向：各类球场行为倾向值
-- **批量编辑** — 一键全队满属性、年轻化、满徽章等
-- **Offset 可配置** — 属性内存偏移独立为 JSON 配置文件，游戏更新后只需更新配置
+---
 
-## 安装
+## Features
 
-### 从源码运行
+### Player Editing
+- **Full Attribute Control** — Edit all 50+ player ratings (shooting, defense, athleticism, IQ, etc.)
+- **Badges** — Set any badge to Bronze / Silver / Gold / Hall of Fame
+- **Tendencies** — Fine-tune 60+ AI behavior tendencies (shot selection, drives, post moves, defense)
+- **Contracts** — Modify salary for up to 6 years, bird rights, two-way contract days
+- **Body & Bio** — Height, weight, wingspan, age, draft info, jersey number
+- **Potential & Growth** — Peak age range, boom/bust rates, potential ceiling/floor
+- **Durability** — Per-body-part injury resistance (head, knees, ankles, etc.)
+- **Personality** — Loyalty, ring chasing, financial security
+
+### God Mode
+One-click to make any player unstoppable:
+- All ratings → 99
+- All badges → Hall of Fame
+- All tendencies → Max
+- All durability → 99
+- Potential → Max
+
+### Batch Editing
+Apply changes to an entire team (or all players) at once:
+- All ratings to 99
+- All badges to HOF
+- All hot zones to max
+- Set birth year (make everyone young)
+- Full God Mode for the whole roster
+
+### Quality of Life
+- **Live Memory Editing** — Changes take effect immediately in-game
+- **Player Search** — Filter by name or team
+- **Team Filter** — Dynamic dropdown built from actual roster data
+- **Dark Theme** — NBA-styled dark UI
+- **Custom Offsets** — Load your own offset config if the game updates
+
+---
+
+## Quick Start
+
+### Option 1: Download the EXE (Recommended)
+
+1. Go to [Releases](https://github.com/Boowenn/NBA-2K26-Trainer/releases) and download `NBA2K26Trainer.exe`
+2. Place it anywhere on your PC (game directory is fine but not required)
+3. Launch NBA 2K26 **without Anti-Cheat** (see below)
+4. Run `NBA2K26Trainer.exe` as Administrator
+5. Click **Connect Game** and start editing
+
+### Option 2: Run from Source
 
 ```bash
-# 克隆仓库
 git clone https://github.com/Boowenn/NBA-2K26-Trainer.git
 cd NBA-2K26-Trainer
-
-# 安装依赖
 pip install -r requirements.txt
-
-# 运行（需要管理员权限）
 python main.py
 ```
 
-### 从 Release 下载
+---
 
-前往 [Releases](https://github.com/Boowenn/NBA-2K26-Trainer/releases) 下载最新的 `NBA2K26Trainer.exe`，直接运行即可。
+## How to Launch NBA 2K26 Without EAC
 
-## 使用方法
+> **This is required.** The trainer reads/writes game memory, which EasyAntiCheat blocks. All community roster editors use the same method.
 
-1. 启动 NBA 2K26 并进入经理模式
-2. 以管理员权限运行 `NBA2K26Trainer.exe`（或 `python main.py`）
-3. 点击「连接游戏」按钮
-4. 等待球员列表加载完成
-5. 在左侧列表中选择要编辑的球员
-6. 在右侧编辑面板中修改属性值
-7. 点击「应用修改」写入游戏内存
+1. Close NBA 2K26 if it's running
+2. **(Recommended)** Disconnect from the internet
+3. In Steam Library, click **Play** on NBA 2K26
+4. A popup appears with two options:
+   - Option 1: "Play Game" (with EAC, online)
+   - **Option 2: "Play without Anti-Cheat" (offline)** ← Select this
+5. Wait for the game to fully load — enter **MyNBA** or **MyGM** mode and load a save
+6. Open the Trainer and click **Connect Game**
 
-## Offset 配置
+> **Note:** Online modes (MyTEAM, Play Online) will not work without EAC. MyNBA, MyGM, and Play Now all work fine offline.
 
-属性的内存偏移定义在 `config/offsets_2k26.json` 中。当游戏更新导致偏移变化时，只需更新此文件。
+---
 
-你也可以点击「加载Offset」按钮加载自定义的 offset 配置文件。
+## Usage
 
-### 获取正确的 Offset
+1. **Connect** — Click "Connect Game" after launching NBA 2K26 without EAC
+2. **Browse** — Use the player list on the left. Search by name or filter by team
+3. **Edit** — Select a player to load their attributes in the right panel. Each category has its own tab
+4. **Apply** — Modify values using sliders/spinboxes, then click "Apply Changes". Modified attributes are highlighted in orange
+5. **God Mode** — Click the God Mode button to max everything for the selected player
+6. **Batch Edit** — Click "Batch Edit" to apply changes to all players on the selected team
 
-配置文件中的 offset 为示例值，实际值需要通过以下方式获取：
+---
 
-1. 参考 [discobisco/2k26-Editor](https://github.com/discobisco/2k26-Editor) 项目的 offset 数据
-2. 使用 Cheat Engine 手动逆向确定
-3. 参考 [NLSC Forum](https://forums.nba-live.com/) 社区的 Cheat Table
+## Offset Configuration
 
-## 构建 EXE
+Player attribute memory offsets are defined in `config/offsets_2k26.json`. When a game patch changes the memory layout, only this file needs to be updated.
+
+You can also click **Load Offsets** in the toolbar to load a custom config file at runtime.
+
+### Finding Updated Offsets
+
+If the game updates and the current offsets break:
+
+1. Reference [discobisco/2k26-Editor](https://github.com/discobisco/2k26-Editor) for community-maintained offsets
+2. Use [Cheat Engine](https://www.cheatengine.org/) to manually locate values
+3. Check the [NLSC Forums](https://forums.nba-live.com/) for updated Cheat Tables
+
+---
+
+## Project Structure
+
+```
+NBA-2K26-Trainer/
+├── main.py                         # Entry point (admin check + PyQt5 app)
+├── config/
+│   └── offsets_2k26.json           # Memory offset definitions (JSON)
+├── nba2k26_trainer/
+│   ├── core/
+│   │   ├── memory.py               # Win32 ReadProcessMemory / WriteProcessMemory
+│   │   ├── process.py              # Process discovery (find NBA2K26.exe)
+│   │   ├── scanner.py              # Dynamic player table scanner
+│   │   └── offsets.py              # Offset config loader
+│   ├── models/
+│   │   ├── player.py               # Player data model + read/write logic
+│   │   └── team.py                 # Team data model
+│   └── ui/
+│       ├── main_window.py          # Main window layout
+│       ├── player_list.py          # Player list with search/filter
+│       ├── attribute_editor.py     # Tabbed attribute editor panel
+│       ├── batch_editor.py         # Batch editing dialog
+│       └── theme.py                # Dark NBA-style theme (QSS)
+├── NBA2K26Trainer.spec             # PyInstaller build config
+├── requirements.txt                # Python dependencies
+└── LICENSE                         # MIT License
+```
+
+---
+
+## Building from Source
 
 ```bash
 pip install pyinstaller
 pyinstaller NBA2K26Trainer.spec
 ```
 
-输出文件在 `dist/NBA2K26Trainer.exe`。
+The output EXE will be in `dist/NBA2K26Trainer.exe`.
 
-## 技术架构
+---
 
-```
-nba2k26_trainer/
-├── core/
-│   ├── memory.py       # Win32 内存读写层 (ctypes)
-│   ├── process.py      # 进程发现与附加
-│   ├── scanner.py      # AOB 特征码扫描
-│   └── offsets.py      # Offset 加载与管理
-├── models/
-│   ├── player.py       # 球员数据模型
-│   └── team.py         # 球队数据模型
-├── ui/
-│   ├── main_window.py      # 主窗口
-│   ├── player_list.py      # 球员列表组件
-│   ├── attribute_editor.py # 属性编辑面板
-│   ├── batch_editor.py     # 批量编辑对话框
-│   └── theme.py            # UI 主题
-└── config/
-    └── offsets_2k26.json   # 属性偏移配置
-```
+## Technical Details
 
-## 免责声明
+- **Memory Access**: Direct Win32 API calls via `ctypes` (`ReadProcessMemory` / `WriteProcessMemory`)
+- **Player Table Discovery**: Two-stage scanner — first scans the game module's data sections for pointers to the player table, then falls back to searching for known player name pairs in memory
+- **Data Types**: Supports uint8/16/32/64, int8/16/32, float, bitfields (packed bits), UTF-16LE strings, and ASCII strings
+- **Module Base**: Standard x64 PE base at `0x140000000`
+- **Player Record**: 1176 bytes per player (stride `0x498`), with names stored as UTF-16LE wide strings
 
-本工具仅供学习和研究用途。使用修改器可能违反游戏服务条款并导致账号封禁。请自行承担使用风险。
+---
+
+## Requirements
+
+| Dependency | Purpose |
+|------------|---------|
+| Python 3.10+ | Runtime |
+| PyQt5 | GUI framework |
+| ctypes (built-in) | Win32 API memory access |
+| PyInstaller | EXE packaging (build only) |
+
+---
+
+## Disclaimer
+
+This tool is for **offline single-player use only** (MyNBA / MyGM / Play Now).
+
+Modifying game memory may violate the game's Terms of Service. **Do not use this in online modes.** The author is not responsible for any consequences of using this tool.
+
+---
 
 ## License
 
-MIT License
+[MIT License](LICENSE) - Copyright (c) 2026 Boowenn

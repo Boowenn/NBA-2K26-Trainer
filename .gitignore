@@ -1,14 +1,34 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
-dist/
-build/
-*.spec.bak
+*.egg
+.eggs/
+
+# Virtual environments
 .venv/
 venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Executables
 *.exe
-!NBA2K26Trainer.spec
+
+# IDE
 .idea/
 .vscode/
+*.swp
+*.swo
+
+# Logs
 *.log
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
