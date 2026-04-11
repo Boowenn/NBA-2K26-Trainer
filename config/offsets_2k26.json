@@ -5,8 +5,8 @@
   "source": "https://github.com/discobisco/2k26-Editor",
 
   "player_table": {
-    "base_pointer": 131015096,
-    "base_pointer_hex": "0x7CF21B8",
+    "base_pointer": 132648880,
+    "base_pointer_hex": "0x7E80FB0",
     "pointer_offsets": [],
     "stride": 1176,
     "stride_hex": "0x498",
@@ -30,7 +30,7 @@
 
   "attributes": {
     "基本信息": [
-      {"name": "综合评分", "offset": 61, "type": "uint8", "min": 0, "max": 99, "description": "Overall Rating"},
+      {"name": "综合评分", "offset": 1047, "type": "uint8", "min": 0, "max": 99, "description": "Overall Rating"},
       {"name": "球衣号码", "offset": 63, "type": "uint8", "min": 0, "max": 99, "description": "Jersey Number"},
       {"name": "面部模型ID", "offset": 264, "type": "uint16", "min": 0, "max": 65535, "description": "Face/Cyberface ID"},
       {"name": "肖像ID", "offset": 808, "type": "uint32", "min": 0, "max": 999999, "description": "Portrait ID"},
@@ -47,10 +47,10 @@
       {"name": "身高(cm)", "offset": 120, "type": "uint16", "min": 160, "max": 230, "description": "Height in cm"},
       {"name": "臂展(cm)", "offset": 122, "type": "uint16", "min": 170, "max": 260, "description": "Wingspan in cm"},
       {"name": "体重", "offset": 256, "type": "float", "min": 60, "max": 180, "description": "Weight (kg)"},
-      {"name": "躯干长度", "offset": 124, "type": "float", "min": 25, "max": 75, "description": "Trunk Length"},
-      {"name": "肩宽", "offset": 128, "type": "float", "min": 25, "max": 75, "description": "Shoulder Width"},
-      {"name": "手臂比例", "offset": 132, "type": "float", "min": 0, "max": 100, "description": "Arm Scale"},
-      {"name": "颈部长度", "offset": 136, "type": "float", "min": 25, "max": 75, "description": "Neck Length"}
+      {"name": "躯干长度", "offset": 124, "type": "float", "min": 80, "max": 120, "description": "Trunk Length"},
+      {"name": "肩宽", "offset": 128, "type": "float", "min": 80, "max": 120, "description": "Shoulder Width"},
+      {"name": "手臂比例", "offset": 132, "type": "float", "min": 80, "max": 120, "description": "Arm Scale"},
+      {"name": "颈部长度", "offset": 136, "type": "float", "min": 80, "max": 120, "description": "Neck Length"}
     ],
 
     "进攻能力": [
@@ -130,29 +130,29 @@
     ],
 
     "徽章-内线进攻": [
-      {"name": "空中奇才", "offset": 1149, "type": "bitfield", "bit_start": 4, "bit_length": 3, "min": 0, "max": 7, "description": "Aerial Wizard"},
-      {"name": "抛投大师", "offset": 1148, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Float Game"},
-      {"name": "勾手专家", "offset": 1149, "type": "bitfield", "bit_start": 7, "bit_length": 3, "min": 0, "max": 7, "description": "Hook Specialist"},
-      {"name": "上篮混合大师", "offset": 1158, "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 7, "description": "Layup Mix Master"},
-      {"name": "油漆区天才", "offset": 1158, "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 7, "description": "Paint Prodigy"},
-      {"name": "身体终结者", "offset": 1159, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Physical Finisher"},
-      {"name": "后仰大师", "offset": 1150, "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 7, "description": "Post Fade Phenom"},
-      {"name": "背身强攻", "offset": 1159, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Post Powerhouse"},
-      {"name": "背身诗人", "offset": 1160, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Post Up Poet"},
-      {"name": "隔扣之王", "offset": 1148, "type": "bitfield", "bit_start": 6, "bit_length": 3, "min": 0, "max": 7, "description": "Posterizer"},
-      {"name": "起飞", "offset": 1149, "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 7, "description": "Rise Up"}
+      {"name": "空中奇才", "offset": 1149, "type": "bitfield", "bit_start": 4, "bit_length": 3, "min": 0, "max": 4, "description": "Aerial Wizard"},
+      {"name": "抛投大师", "offset": 1148, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Float Game"},
+      {"name": "勾手专家", "offset": 1149, "type": "bitfield", "bit_start": 7, "bit_length": 3, "min": 0, "max": 4, "description": "Hook Specialist"},
+      {"name": "上篮混合大师", "offset": 1158, "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 4, "description": "Layup Mix Master"},
+      {"name": "油漆区天才", "offset": 1158, "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 4, "description": "Paint Prodigy"},
+      {"name": "身体终结者", "offset": 1159, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Physical Finisher"},
+      {"name": "后仰大师", "offset": 1150, "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 4, "description": "Post Fade Phenom"},
+      {"name": "背身强攻", "offset": 1159, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Post Powerhouse"},
+      {"name": "背身诗人", "offset": 1160, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Post Up Poet"},
+      {"name": "隔扣之王", "offset": 1148, "type": "bitfield", "bit_start": 6, "bit_length": 3, "min": 0, "max": 4, "description": "Posterizer"},
+      {"name": "起飞", "offset": 1149, "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 4, "description": "Rise Up"}
     ],
 
     "徽章-外线投篮": [
-      {"name": "死神之眼", "offset": 1150, "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 7, "description": "Deadeye"},
-      {"name": "无限射程", "offset": 1151, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Limitless Range"},
-      {"name": "迷你神射手", "offset": 1160, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Mini Marksman"},
-      {"name": "灵活射手", "offset": 1161, "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 7, "description": "Shifty Shooter"},
-      {"name": "无球跑位", "offset": 1151, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Slippery Off-Ball"}
+      {"name": "死神之眼", "offset": 1150, "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 4, "description": "Deadeye"},
+      {"name": "无限射程", "offset": 1151, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Limitless Range"},
+      {"name": "迷你神射手", "offset": 1160, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Mini Marksman"},
+      {"name": "灵活射手", "offset": 1161, "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 4, "description": "Shifty Shooter"},
+      {"name": "无球跑位", "offset": 1151, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Slippery Off-Ball"}
     ],
 
     "徽章-组织": [
-      {"name": "绝境传球", "offset": 1152, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Bailout"}
+      {"name": "绝境传球", "offset": 1152, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Bailout"}
     ],
 
     "投篮倾向": [

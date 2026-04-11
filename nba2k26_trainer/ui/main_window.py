@@ -3,7 +3,7 @@
 import os
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QPushButton, QLabel, QStatusBar, QMessageBox, QFileDialog,
+    QPushButton, QLabel, QStatusBar, QMessageBox, QFileDialog, QComboBox,
     QToolBar, QAction
 )
 from PyQt5.QtCore import Qt, QTimer
@@ -31,6 +31,7 @@ class MainWindow(QMainWindow):
         self.player_mgr: Optional[PlayerManager] = None
         self.players = []
         self._player_index_map = {}
+        self.roster_mode = "auto"
 
         self.setWindowTitle("NBA 2K26 Trainer v2.1")
         self.setMinimumSize(1200, 750)
@@ -91,6 +92,21 @@ class MainWindow(QMainWindow):
         self.btn_refresh.setEnabled(False)
         toolbar.addWidget(self.btn_refresh)
 
+        self.roster_mode_label = QLabel("Roster")
+        toolbar.addWidget(self.roster_mode_label)
+
+        self.roster_mode_combo = QComboBox()
+        self.roster_mode_combo.addItem("Auto", "auto")
+        self.roster_mode_combo.addItem("Current", "current")
+        self.roster_mode_combo.addItem("Legend/Eras", "legend")
+        self.roster_mode_combo.setCurrentIndex(0)
+        self.roster_mode_combo.setToolTip(
+            "Auto follows the roster table currently used by your loaded save. "
+            "Use Current or Legend/Eras only if you want to force a specific roster family."
+        )
+        self.roster_mode_combo.currentIndexChanged.connect(self._on_roster_mode_changed)
+        toolbar.addWidget(self.roster_mode_combo)
+
         self.btn_batch = QPushButton("Batch Edit")
         self.btn_batch.clicked.connect(self._open_batch_editor)
         self.btn_batch.setEnabled(False)
@@ -140,6 +156,7 @@ class MainWindow(QMainWindow):
             self.btn_batch.setEnabled(True)
 
             self.player_mgr = PlayerManager(self.mem, self.config)
+            self.player_mgr.set_roster_mode(self.roster_mode)
             self.attr_editor.set_player_manager(self.player_mgr)
             self.statusbar.showMessage(
                 f"Connected to NBA2K26.exe (Base: 0x{self.mem.base_address:X})"
@@ -223,6 +240,7 @@ class MainWindow(QMainWindow):
 
         # Reset cached table base so it re-scans
         self.player_mgr._table_base = None
+        self.player_mgr.set_roster_mode(self.roster_mode)
 
         def progress(msg):
             self.statusbar.showMessage(msg)
@@ -251,6 +269,14 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage(
                 f"Loaded {len(self.players)} players (table base: {base_str})"
             )
+
+    def _on_roster_mode_changed(self, *_args):
+        if not hasattr(self, "roster_mode_combo"):
+            return
+        self.roster_mode = self.roster_mode_combo.currentData() or "auto"
+        if self.player_mgr is not None:
+            self.player_mgr.set_roster_mode(self.roster_mode)
+            self._refresh_players()
 
     def _debug_table_scan(self) -> str:
         """Collect debug info about table scanning"""
