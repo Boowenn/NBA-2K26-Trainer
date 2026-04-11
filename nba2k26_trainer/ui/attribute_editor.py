@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
     QLabel, QSpinBox, QDoubleSpinBox, QSlider, QGridLayout, QPushButton,
     QMessageBox, QGroupBox, QFrame
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont
 
 from ..core.offsets import OffsetConfig, AttributeDef
@@ -133,6 +133,9 @@ class AttributeEditorWidget(QWidget):
         self.player_mgr = player_mgr
         self.current_player: Optional[Player] = None
         self._attr_rows: Dict[str, AttributeRow] = {}
+        self._perfect_shot_timer = QTimer(self)
+        self._perfect_shot_timer.setInterval(50)
+        self._perfect_shot_timer.timeout.connect(self._on_perfect_shot_tick)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -191,6 +194,17 @@ class AttributeEditorWidget(QWidget):
         )
         self.btn_god.clicked.connect(self._apply_god_mode)
         btn_layout.addWidget(self.btn_god)
+
+        self.btn_perfect_shot = QPushButton("Lock Green Beta")
+        self.btn_perfect_shot.setObjectName("btn_max")
+        self.btn_perfect_shot.setCheckable(True)
+        self.btn_perfect_shot.setToolTip(
+            "Continuously pins the live in-match shot entry so the release state stays forced.\n"
+            "Only works while a game is actively in progress.\n"
+            "Beta: this is a live runtime patch, not a roster edit."
+        )
+        self.btn_perfect_shot.clicked.connect(self._toggle_perfect_shot_beta)
+        btn_layout.addWidget(self.btn_perfect_shot)
 
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
@@ -309,13 +323,96 @@ class AttributeEditorWidget(QWidget):
             return
 
         count = self.player_mgr.apply_god_mode(self.current_player)
-        QMessageBox.information(
-            self, "超级模式已激活",
-            f"已成功修改 {count} 项属性！\n\n"
-            f"{self.current_player.full_name} 现在是无敌的！"
-        )
+        summary = self.player_mgr.summarize_live_gameplay_state(self.current_player)
+        compact_count = int(summary.get("match_compact_entries", 0) or 0)
+        compact_bases = summary.get("match_compact_bases", [])
+        attr_summary = summary.get("attributes", {})
+
+        lines = [
+            f"Updated {count} attributes for {self.current_player.full_name}.",
+        ]
+        if compact_count:
+            compact_text = ", ".join(compact_bases[:3])
+            if len(compact_bases) > 3:
+                compact_text += ", ..."
+            lines.append(f"In-match compact copies synced: {compact_count}")
+            if compact_text:
+                lines.append(f"Match copy bases: {compact_text}")
+        else:
+            lines.append("No in-match compact copies were found for this player right now.")
+
+        for label in (
+            "Three-Point Shot",
+            "Mid-Range Shot",
+            "Driving Layup",
+            "Deadeye",
+            "Spot Up Drive",
+            "Contest Shot",
+        ):
+            values = attr_summary.get(label)
+            if not values:
+                continue
+            match_values = values.get("match_copies") or []
+            mirror_text = ", ".join(str(value) for value in match_values) if match_values else "n/a"
+            lines.append(f"{label}: {values.get('current')} | Match copies: {mirror_text}")
+
+        QMessageBox.information(self, "God Mode Applied", "\n".join(lines))
         # 重新加载显示
         self.load_player(self.current_player)
 
-    def set_player_manager(self, mgr: PlayerManager):
+    def _set_perfect_shot_button_state(self, active: bool) -> None:
+        self.btn_perfect_shot.blockSignals(True)
+        self.btn_perfect_shot.setChecked(active)
+        self.btn_perfect_shot.setText("Stop Lock Green Beta" if active else "Lock Green Beta")
+        self.btn_perfect_shot.blockSignals(False)
+
+    def _toggle_perfect_shot_beta(self, checked: bool) -> None:
+        if self.player_mgr is None:
+            self._set_perfect_shot_button_state(False)
+            QMessageBox.warning(self, "Warning", "Connect the game first.")
+            return
+
+        if not checked:
+            self._perfect_shot_timer.stop()
+            self._set_perfect_shot_button_state(False)
+            return
+
+        summary = self.player_mgr.enforce_perfect_shot_beta()
+        if int(summary.get("patched_entries", 0) or 0) <= 0:
+            self._set_perfect_shot_button_state(False)
+            QMessageBox.warning(
+                self,
+                "Lock Green Beta",
+                "No live in-match shot entry was found.\n\n"
+                "Start an actual game and let the match fully load, then try again.",
+            )
+            return
+
+        self._perfect_shot_timer.start()
+        self._set_perfect_shot_button_state(True)
+
+        lines = [
+            "Lock Green Beta is now running.",
+            f"Manager base: {summary.get('manager_base') or 'n/a'}",
+            f"Live entries patched: {summary.get('patched_entries')}",
+        ]
+        for entry in summary.get("entries", [])[:3]:
+            lines.append(
+                f"{entry.get('base')}: flag={entry.get('enable_byte')} | "
+                f"timer={entry.get('lock_timer')} | alt={entry.get('lock_timer_alt')}"
+            )
+
+        QMessageBox.information(self, "Lock Green Beta Enabled", "\n".join(lines))
+
+    def _on_perfect_shot_tick(self) -> None:
+        if self.player_mgr is None:
+            self._perfect_shot_timer.stop()
+            self._set_perfect_shot_button_state(False)
+            return
+        self.player_mgr.enforce_perfect_shot_beta()
+
+    def set_player_manager(self, mgr: Optional[PlayerManager]):
+        if mgr is None:
+            self._perfect_shot_timer.stop()
+            self._set_perfect_shot_button_state(False)
         self.player_mgr = mgr

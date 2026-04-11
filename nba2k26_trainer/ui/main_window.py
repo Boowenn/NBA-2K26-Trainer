@@ -361,6 +361,7 @@ class MainWindow(QMainWindow):
             if not is_process_running():
                 self.mem = None
                 self.player_mgr = None
+                self.attr_editor.set_player_manager(None)
                 self.status_label.setText("Disconnected")
                 self.status_label.setStyleSheet("color: #ff5252; font-weight: bold;")
                 self.btn_refresh.setEnabled(False)
