@@ -266,6 +266,37 @@ PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET = 0x364
 PERFECT_SHOT_FORCED_ENABLE_VALUE = 1
 PERFECT_SHOT_FORCED_LOCK_VALUE = 0x7FFFFFFF
 PERFECT_SHOT_MAX_ENTRY_COUNT = 8
+SHOT_RUNTIME_GLOBAL_PTR_SLOT = 0x14683DE68
+SHOT_RUNTIME_CONTAINER_OFFSET = 0xA8
+SHOT_RUNTIME_ENTRY_COUNT_OFFSET = 0x4B0
+SHOT_RUNTIME_ENTRY_BASE_OFFSET = 0x4B8
+SHOT_RUNTIME_ENTRY_STRIDE = 0xC1B8
+SHOT_RUNTIME_MAX_ENTRY_COUNT = 4
+SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET = 0x1590
+SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE = 0x20
+SHOT_RUNTIME_TEAM_BLOCK_OFFSET = 0x110
+SHOT_RUNTIME_TEAM_BLOCK_SIZE = 0x7A0
+SHOT_RUNTIME_TEAM_LINK_MAX_OBJECTS = 220
+SHOT_RUNTIME_TEAM_LINK_START_RELS: Tuple[int, ...] = (
+    0x00,
+    0x08,
+    0x10,
+    0x20,
+    0x28,
+    0x30,
+    0x40,
+    0x48,
+    0x50,
+    0x58,
+    0x60,
+    0x68,
+    0x70,
+    0x78,
+    0x80,
+    0x88,
+    0x98,
+)
+PERFECT_SHOT_REFRESH_TEAM_INTERVAL = 40
 
 
 @dataclass
@@ -404,6 +435,8 @@ class PlayerManager:
         self._module_ref_count_cache: Dict[int, int] = {}
         self._match_compact_region_cache: Dict[int, List[Tuple[int, int, int, int]]] = {}
         self._match_compact_entry_cache: Dict[int, List[int]] = {}
+        self._perfect_shot_beta_state: Optional[Dict[str, Any]] = None
+        self._shot_runtime_team_block_cache: Dict[Tuple[int, int], Optional[int]] = {}
 
     def set_roster_mode(self, mode: str) -> None:
         mode = (mode or "auto").strip().lower()
@@ -419,6 +452,7 @@ class PlayerManager:
         self._module_ref_count_cache.clear()
         self._match_compact_region_cache.clear()
         self._match_compact_entry_cache.clear()
+        self._shot_runtime_team_block_cache.clear()
 
     def begin_refresh(self, *, force_rescan: bool = False) -> None:
         if force_rescan:
@@ -430,6 +464,7 @@ class PlayerManager:
             self._module_ref_count_cache.clear()
             self._match_compact_region_cache.clear()
             self._match_compact_entry_cache.clear()
+            self._shot_runtime_team_block_cache.clear()
 
     def _discard_table_base(self, table_base: Optional[int]) -> None:
         if table_base is None:
@@ -440,6 +475,7 @@ class PlayerManager:
         self._module_ref_count_cache.pop(table_base, None)
         self._match_compact_region_cache.clear()
         self._match_compact_entry_cache.clear()
+        self._shot_runtime_team_block_cache.clear()
 
     def _is_cached_table_base_valid(self, table_base: int) -> bool:
         pt = self.config.player_table
@@ -1867,6 +1903,240 @@ class PlayerManager:
 
         return count
 
+    def apply_god_mode_to_team(self, team_id: int, team_name: Optional[str] = None) -> Dict[str, Any]:
+        if not self.players:
+            self.scan_players()
+
+        normalized_team_name = _normalize_text(team_name).lower()
+        players = []
+        for candidate in self.players:
+            same_team_id = candidate.team_id == team_id
+            same_team_name = bool(normalized_team_name) and _normalize_text(candidate.team_name).lower() == normalized_team_name
+            if same_team_id or same_team_name:
+                players.append(candidate)
+
+        boosted_players = 0
+        boosted_attributes = 0
+        for player in players:
+            boosted_attributes += self.apply_god_mode(player)
+            boosted_players += 1
+        return {
+            "boosted_players": boosted_players,
+            "boosted_attributes": boosted_attributes,
+        }
+
+    def _resolve_shot_runtime_entry_bases(self) -> List[int]:
+        global_obj = int(self.mem.read_uint64(SHOT_RUNTIME_GLOBAL_PTR_SLOT) or 0)
+        if global_obj <= 0:
+            return []
+
+        container = int(self.mem.read_uint64(global_obj + SHOT_RUNTIME_CONTAINER_OFFSET) or 0)
+        if container <= 0:
+            return []
+
+        count = int(self.mem.read_uint32(container + SHOT_RUNTIME_ENTRY_COUNT_OFFSET) or 0)
+        entries_base = int(self.mem.read_uint64(container + SHOT_RUNTIME_ENTRY_BASE_OFFSET) or 0)
+        if count <= 0 or entries_base <= 0:
+            return []
+
+        bases: List[int] = []
+        for index in range(min(count, SHOT_RUNTIME_MAX_ENTRY_COUNT)):
+            entry_base = entries_base + index * SHOT_RUNTIME_ENTRY_STRIDE
+            if self.mem.read_bytes(entry_base, 0x20) is None:
+                continue
+            bases.append(entry_base)
+        return bases
+
+    def _get_player_team_ptr(self, player: Player) -> int:
+        table_base = self._get_table_base_for_player(player)
+        if table_base is None:
+            return 0
+        team_table_base = self._resolve_team_table_base()
+        team_ptr_offset, _ = self._resolve_live_team_ptr_offset(table_base, team_table_base)
+        return int(self.mem.read_uint64(player.record_address + team_ptr_offset) or 0)
+
+    def _team_block_contains_targets(
+        self,
+        block_base: int,
+        targets: Dict[int, str],
+    ) -> List[str]:
+        hits: List[str] = []
+        seen: set[int] = set()
+        queue: List[Tuple[str, int, int]] = [
+            (f"+0x{rel:03X}", int(self.mem.read_uint64(block_base + rel) or 0), 0)
+            for rel in SHOT_RUNTIME_TEAM_LINK_START_RELS
+        ]
+        explored = 0
+
+        while queue and explored < SHOT_RUNTIME_TEAM_LINK_MAX_OBJECTS:
+            label, ptr, depth = queue.pop(0)
+            if ptr <= 0 or ptr in seen or ptr > MAX_VALID_POINTER:
+                continue
+
+            seen.add(ptr)
+            explored += 1
+            if ptr in targets:
+                hits.append(f"direct:{targets[ptr]}:{label}:{depth}")
+
+            blob = self.mem.read_bytes(ptr, 0x200) or b""
+            if not blob:
+                continue
+
+            for target, target_name in targets.items():
+                qword = target.to_bytes(8, "little")
+                dword = (target & 0xFFFFFFFF).to_bytes(4, "little")
+                if blob.find(qword) >= 0 or blob.find(dword) >= 0:
+                    hits.append(f"ref:{target_name}:{label}:{depth}")
+
+            if depth >= 2:
+                continue
+
+            for offset in range(0, min(len(blob), 0x80), 8):
+                child = int.from_bytes(blob[offset: offset + 8], "little")
+                if child and child not in seen:
+                    queue.append((f"{label}->0x{offset:02X}", child, depth + 1))
+
+        return hits
+
+    def _resolve_shot_runtime_team_block_index(self, entry_base: int, player: Player) -> Optional[int]:
+        team_ptr = self._get_player_team_ptr(player)
+        if team_ptr <= 0:
+            return None
+
+        cache_key = (entry_base, team_ptr)
+        cached = self._shot_runtime_team_block_cache.get(cache_key)
+        if cache_key in self._shot_runtime_team_block_cache:
+            return cached
+
+        targets: Dict[int, str] = {
+            int(player.record_address): "player_record",
+            team_ptr: "team_ptr",
+        }
+        summary = self.summarize_live_gameplay_state(player)
+        for index, base_hex in enumerate(summary.get("match_compact_bases", [])):
+            try:
+                targets[int(base_hex, 16)] = f"match_compact_{index}"
+            except (TypeError, ValueError):
+                continue
+
+        scored_hits: List[Tuple[int, int]] = []
+        for block_index in (0, 1):
+            block_base = entry_base + SHOT_RUNTIME_TEAM_BLOCK_OFFSET + block_index * SHOT_RUNTIME_TEAM_BLOCK_SIZE
+            hits = self._team_block_contains_targets(block_base, targets)
+            if hits:
+                scored_hits.append((len(hits), block_index))
+
+        result: Optional[int] = None
+        if scored_hits:
+            scored_hits.sort(reverse=True)
+            result = scored_hits[0][1]
+
+        self._shot_runtime_team_block_cache[cache_key] = result
+        return result
+
+    def _clear_legacy_perfect_shot_state(self) -> bool:
+        cleared = False
+        for entry_base in self._get_perfect_shot_beta_entry_bases():
+            cleared = self.mem.write_uint8(entry_base + PERFECT_SHOT_ENABLE_OFFSET, 0) or cleared
+            cleared = self.mem.write_uint32(entry_base + PERFECT_SHOT_LOCK_TIMER_OFFSET, 0) or cleared
+            cleared = self.mem.write_uint32(entry_base + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET, 0) or cleared
+        return cleared
+
+    def start_perfect_shot_beta(self, player: Player) -> Dict[str, Any]:
+        if self._perfect_shot_beta_state is not None:
+            self.stop_perfect_shot_beta()
+
+        entry_bases = self._resolve_shot_runtime_entry_bases()
+        if not entry_bases:
+            return {
+                "active": False,
+                "error": "No shot runtime entry was found.",
+            }
+
+        entry_base = entry_bases[0]
+        ai_delta_address = entry_base + SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET
+        original_ai_delta = self.mem.read_bytes(ai_delta_address, SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
+        if not original_ai_delta or len(original_ai_delta) != SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE:
+            return {
+                "active": False,
+                "error": "Failed to read the live AI timing delta buffer.",
+            }
+
+        target_team_name = player.team_name or "Unknown"
+        team_summary = self.apply_god_mode_to_team(player.team_id, player.team_name)
+        zero_buffer = bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
+        ai_delta_written = bool(self.mem.write_bytes(ai_delta_address, zero_buffer))
+        legacy_cleared = self._clear_legacy_perfect_shot_state()
+        team_block_index = self._resolve_shot_runtime_team_block_index(entry_base, player)
+
+        self._perfect_shot_beta_state = {
+            "entry_base": entry_base,
+            "ai_delta_address": ai_delta_address,
+            "original_ai_delta": original_ai_delta,
+            "zero_ai_delta": zero_buffer,
+            "team_id": player.team_id,
+            "team_name": target_team_name,
+            "team_block_index": team_block_index,
+            "refresh_counter": 0,
+        }
+
+        return {
+            "active": True,
+            "entry_base": hex(entry_base),
+            "target_team_name": target_team_name,
+            "team_block_index": team_block_index,
+            "ai_delta_written": ai_delta_written,
+            "legacy_cleared": legacy_cleared,
+            **team_summary,
+        }
+
+    def refresh_perfect_shot_beta(self) -> Dict[str, Any]:
+        state = self._perfect_shot_beta_state
+        if not state:
+            return {"active": False}
+
+        ai_delta_address = int(state["ai_delta_address"])
+        zero_buffer = state["zero_ai_delta"]
+        ai_delta_written = bool(self.mem.write_bytes(ai_delta_address, zero_buffer))
+        state["refresh_counter"] = int(state.get("refresh_counter", 0)) + 1
+
+        team_refresh_summary = {"boosted_players": 0, "boosted_attributes": 0}
+        if state["refresh_counter"] % PERFECT_SHOT_REFRESH_TEAM_INTERVAL == 0:
+            team_refresh_summary = self.apply_god_mode_to_team(
+                int(state["team_id"]),
+                str(state.get("team_name") or ""),
+            )
+
+        return {
+            "active": True,
+            "entry_base": hex(int(state["entry_base"])),
+            "target_team_name": state["team_name"],
+            "team_block_index": state["team_block_index"],
+            "ai_delta_written": ai_delta_written,
+            **team_refresh_summary,
+        }
+
+    def stop_perfect_shot_beta(self) -> Dict[str, Any]:
+        state = self._perfect_shot_beta_state
+        if not state:
+            return {"active": False, "restored": False}
+
+        restored = bool(
+            self.mem.write_bytes(
+                int(state["ai_delta_address"]),
+                state["original_ai_delta"],
+            )
+        )
+        legacy_cleared = self._clear_legacy_perfect_shot_state()
+        team_name = state.get("team_name", "Unknown")
+        self._perfect_shot_beta_state = None
+        return {
+            "active": False,
+            "restored": restored,
+            "legacy_cleared": legacy_cleared,
+            "target_team_name": team_name,
+        }
+
     def _resolve_perfect_shot_manager_base(self) -> Optional[int]:
         module_base = int(self.mem.base_address or 0)
         if module_base <= 0:
@@ -1896,11 +2166,11 @@ class PlayerManager:
         return entry_bases
 
     def get_perfect_shot_beta_state(self) -> Dict[str, Any]:
-        manager_base = self._resolve_perfect_shot_manager_base()
-        entry_bases = self._get_perfect_shot_beta_entry_bases()
-        entries: List[Dict[str, Any]] = []
-        for entry_base in entry_bases:
-            entries.append(
+        state = self._perfect_shot_beta_state or {}
+        legacy_manager_base = self._resolve_perfect_shot_manager_base()
+        legacy_entries: List[Dict[str, Any]] = []
+        for entry_base in self._get_perfect_shot_beta_entry_bases():
+            legacy_entries.append(
                 {
                     "base": hex(entry_base),
                     "enable_byte": int(self.mem.read_uint8(entry_base + PERFECT_SHOT_ENABLE_OFFSET) or 0),
@@ -1912,30 +2182,13 @@ class PlayerManager:
             )
 
         return {
-            "manager_base": hex(manager_base) if manager_base is not None else None,
-            "entry_bases": [hex(base) for base in entry_bases],
-            "entry_count": len(entry_bases),
-            "entries": entries,
+            "active": bool(state),
+            "entry_base": hex(int(state["entry_base"])) if state.get("entry_base") else None,
+            "target_team_name": state.get("team_name"),
+            "team_block_index": state.get("team_block_index"),
+            "legacy_manager_base": hex(legacy_manager_base) if legacy_manager_base is not None else None,
+            "legacy_entries": legacy_entries,
         }
 
     def enforce_perfect_shot_beta(self) -> Dict[str, Any]:
-        patched_entries = 0
-        for entry_base in self._get_perfect_shot_beta_entry_bases():
-            armed_ok = self.mem.write_uint8(
-                entry_base + PERFECT_SHOT_ENABLE_OFFSET,
-                PERFECT_SHOT_FORCED_ENABLE_VALUE,
-            )
-            timer_ok = self.mem.write_uint32(
-                entry_base + PERFECT_SHOT_LOCK_TIMER_OFFSET,
-                PERFECT_SHOT_FORCED_LOCK_VALUE,
-            )
-            alt_timer_ok = self.mem.write_uint32(
-                entry_base + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET,
-                PERFECT_SHOT_FORCED_LOCK_VALUE,
-            )
-            if armed_ok and timer_ok and alt_timer_ok:
-                patched_entries += 1
-
-        summary = self.get_perfect_shot_beta_state()
-        summary["patched_entries"] = patched_entries
-        return summary
+        return self.refresh_perfect_shot_beta()

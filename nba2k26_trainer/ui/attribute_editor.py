@@ -199,9 +199,9 @@ class AttributeEditorWidget(QWidget):
         self.btn_perfect_shot.setObjectName("btn_max")
         self.btn_perfect_shot.setCheckable(True)
         self.btn_perfect_shot.setToolTip(
-            "Continuously pins the live in-match shot entry so the release state stays forced.\n"
-            "Only works while a game is actively in progress.\n"
-            "Beta: this is a live runtime patch, not a roster edit."
+            "Targets the selected player's team during an active game.\n"
+            "It zeroes the live AI timing error buffer for your team and keeps team God Mode refreshed.\n"
+            "Beta: this is safer than the old global lock, but it is still experimental."
         )
         self.btn_perfect_shot.clicked.connect(self._toggle_perfect_shot_beta)
         btn_layout.addWidget(self.btn_perfect_shot)
@@ -374,17 +374,22 @@ class AttributeEditorWidget(QWidget):
 
         if not checked:
             self._perfect_shot_timer.stop()
+            self.player_mgr.stop_perfect_shot_beta()
             self._set_perfect_shot_button_state(False)
             return
 
-        summary = self.player_mgr.enforce_perfect_shot_beta()
-        if int(summary.get("patched_entries", 0) or 0) <= 0:
+        if self.current_player is None:
+            self._set_perfect_shot_button_state(False)
+            QMessageBox.warning(self, "Lock Green Beta", "Select a player from your team first.")
+            return
+
+        summary = self.player_mgr.start_perfect_shot_beta(self.current_player)
+        if not summary.get("active"):
             self._set_perfect_shot_button_state(False)
             QMessageBox.warning(
                 self,
                 "Lock Green Beta",
-                "No live in-match shot entry was found.\n\n"
-                "Start an actual game and let the match fully load, then try again.",
+                str(summary.get("error") or "No live in-match shot entry was found."),
             )
             return
 
@@ -392,16 +397,15 @@ class AttributeEditorWidget(QWidget):
         self._set_perfect_shot_button_state(True)
 
         lines = [
-            "Lock Green Beta is now running.",
-            f"Manager base: {summary.get('manager_base') or 'n/a'}",
-            f"Live entries patched: {summary.get('patched_entries')}",
+            "Lock Green Beta is now running for your selected team.",
+            f"Team: {summary.get('target_team_name') or 'n/a'}",
+            f"Runtime entry: {summary.get('entry_base') or 'n/a'}",
+            f"Runtime team block: {summary.get('team_block_index') if summary.get('team_block_index') is not None else 'unresolved'}",
+            f"AI timing delta zeroed: {'yes' if summary.get('ai_delta_written') else 'no'}",
+            f"Legacy global lock cleared: {'yes' if summary.get('legacy_cleared') else 'no'}",
+            f"Team players boosted: {summary.get('boosted_players', 0)}",
+            f"Attributes refreshed: {summary.get('boosted_attributes', 0)}",
         ]
-        for entry in summary.get("entries", [])[:3]:
-            lines.append(
-                f"{entry.get('base')}: flag={entry.get('enable_byte')} | "
-                f"timer={entry.get('lock_timer')} | alt={entry.get('lock_timer_alt')}"
-            )
-
         QMessageBox.information(self, "Lock Green Beta Enabled", "\n".join(lines))
 
     def _on_perfect_shot_tick(self) -> None:
@@ -409,10 +413,15 @@ class AttributeEditorWidget(QWidget):
             self._perfect_shot_timer.stop()
             self._set_perfect_shot_button_state(False)
             return
-        self.player_mgr.enforce_perfect_shot_beta()
+        summary = self.player_mgr.refresh_perfect_shot_beta()
+        if not summary.get("active"):
+            self._perfect_shot_timer.stop()
+            self._set_perfect_shot_button_state(False)
 
     def set_player_manager(self, mgr: Optional[PlayerManager]):
         if mgr is None:
             self._perfect_shot_timer.stop()
             self._set_perfect_shot_button_state(False)
+            if self.player_mgr is not None:
+                self.player_mgr.stop_perfect_shot_beta()
         self.player_mgr = mgr
