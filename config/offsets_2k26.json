@@ -1,12 +1,12 @@
 {
-  "version": "2.0.0",
-  "game_version": "NBA 2K26 (2026-03-10 patch)",
+  "version": "3.0.0",
+  "game_version": "NBA 2K26",
   "description": "球员属性内存偏移配置 - 基于 discobisco/2k26-Editor 校准",
   "source": "https://github.com/discobisco/2k26-Editor",
 
   "player_table": {
-    "base_pointer": 131015096,
-    "base_pointer_hex": "0x7CF8008",
+    "base_pointer": 132648880,
+    "base_pointer_hex": "0x7E80FB0",
     "pointer_offsets": [],
     "stride": 1176,
     "stride_hex": "0x498",
@@ -23,101 +23,243 @@
   "team_table": {
     "base_pointer": 131015696,
     "base_pointer_hex": "0x7CF8270",
-    "stride": 5672
+    "stride": 5672,
+    "team_name_offset": 738,
+    "team_name_length": 24
   },
 
   "attributes": {
     "基本信息": [
-      {"name": "综合评分", "offset": 61, "offset_hex": "0x3D", "type": "uint8", "min": 0, "max": 99, "description": "Overall Rating"},
-      {"name": "出生年份", "offset": 266, "offset_hex": "0x10A", "type": "bitfield", "bit_start": 0, "bit_length": 12, "min": 1970, "max": 2010, "description": "Birth Year"},
-      {"name": "出生月份", "offset": 835, "offset_hex": "0x343", "type": "bitfield", "bit_start": 4, "bit_length": 4, "min": 1, "max": 12, "description": "Birth Month"},
-      {"name": "出生日期", "offset": 268, "offset_hex": "0x10C", "type": "bitfield", "bit_start": 1, "bit_length": 5, "min": 1, "max": 31, "description": "Birth Day"},
-      {"name": "球衣号码", "offset": 63, "offset_hex": "0x3F", "type": "uint8", "min": 0, "max": 99, "description": "Jersey Number"},
-      {"name": "面部模型ID", "offset": 264, "offset_hex": "0x108", "type": "uint16", "min": 0, "max": 65535, "description": "Face/Cyberface ID"},
-      {"name": "肖像ID", "offset": 808, "offset_hex": "0x328", "type": "uint32", "min": 0, "max": 999999, "description": "Portrait ID"}
+      {"name": "综合评分", "offset": 1047, "type": "uint8", "min": 0, "max": 99, "description": "Overall Rating"},
+      {"name": "球衣号码", "offset": 63, "type": "uint8", "min": 0, "max": 99, "description": "Jersey Number"},
+      {"name": "面部模型ID", "offset": 264, "type": "uint16", "min": 0, "max": 65535, "description": "Face/Cyberface ID"},
+      {"name": "肖像ID", "offset": 808, "type": "uint32", "min": 0, "max": 999999, "description": "Portrait ID"},
+      {"name": "出生年份", "offset": 266, "type": "bitfield", "bit_start": 0, "bit_length": 12, "min": 1970, "max": 2010, "description": "Birth Year"},
+      {"name": "出生月份", "offset": 835, "type": "bitfield", "bit_start": 4, "bit_length": 4, "min": 1, "max": 12, "description": "Birth Month"},
+      {"name": "出生日期", "offset": 268, "type": "bitfield", "bit_start": 1, "bit_length": 5, "min": 1, "max": 31, "description": "Birth Day"},
+      {"name": "球龄", "offset": 926, "type": "bitfield", "bit_start": 1, "bit_length": 5, "min": 0, "max": 25, "description": "Years Pro"},
+      {"name": "选秀年份", "offset": 429, "type": "bitfield", "bit_start": 0, "bit_length": 8, "min": 0, "max": 255, "description": "Drafted Year"},
+      {"name": "选秀顺位", "offset": 834, "type": "bitfield", "bit_start": 6, "bit_length": 6, "min": 0, "max": 60, "description": "Draft Pick Number"},
+      {"name": "选秀轮次", "offset": 819, "type": "bitfield", "bit_start": 3, "bit_length": 4, "min": 0, "max": 2, "description": "Round Drafted"}
     ],
 
     "身体属性": [
-      {"name": "身高(cm)", "offset": 120, "offset_hex": "0x78", "type": "uint16", "min": 160, "max": 230, "description": "Height in cm (within Appearance Data)"},
-      {"name": "臂展(cm)", "offset": 122, "offset_hex": "0x7A", "type": "uint16", "min": 170, "max": 260, "description": "Wingspan in cm"},
-      {"name": "体重", "offset": 256, "offset_hex": "0x100", "type": "float", "min": 60, "max": 180, "description": "Weight (float, kg converted from lbs)"},
-      {"name": "躯干长度", "offset": 124, "offset_hex": "0x7C", "type": "float", "min": 25, "max": 75, "description": "Trunk Length scale 25-75"},
-      {"name": "肩宽", "offset": 128, "offset_hex": "0x80", "type": "float", "min": 25, "max": 75, "description": "Shoulder Length scale 25-75"},
-      {"name": "手臂比例", "offset": 132, "offset_hex": "0x84", "type": "float", "min": 0, "max": 100, "description": "Arm Scale 0-100"},
-      {"name": "颈部长度", "offset": 136, "offset_hex": "0x88", "type": "float", "min": 25, "max": 75, "description": "Neck Length scale 25-75"}
+      {"name": "身高(cm)", "offset": 120, "type": "uint16", "min": 160, "max": 230, "description": "Height in cm"},
+      {"name": "臂展(cm)", "offset": 122, "type": "uint16", "min": 170, "max": 260, "description": "Wingspan in cm"},
+      {"name": "体重", "offset": 256, "type": "float", "min": 60, "max": 180, "description": "Weight (kg)"},
+      {"name": "躯干长度", "offset": 124, "type": "float", "min": 80, "max": 120, "description": "Trunk Length"},
+      {"name": "肩宽", "offset": 128, "type": "float", "min": 80, "max": 120, "description": "Shoulder Width"},
+      {"name": "手臂比例", "offset": 132, "type": "float", "min": 80, "max": 120, "description": "Arm Scale"},
+      {"name": "颈部长度", "offset": 136, "type": "float", "min": 80, "max": 120, "description": "Neck Length"}
     ],
 
     "进攻能力": [
-      {"name": "近距离投篮", "offset": 999, "offset_hex": "0x3E7", "type": "uint8", "min": 25, "max": 99, "description": "Close Shot"},
-      {"name": "造犯规", "offset": 998, "offset_hex": "0x3E6", "type": "uint8", "min": 25, "max": 99, "description": "Draw Foul"},
-      {"name": "中距离投篮", "offset": 1000, "offset_hex": "0x3E8", "type": "uint8", "min": 25, "max": 99, "description": "Mid-Range Shot"},
-      {"name": "三分球", "offset": 1001, "offset_hex": "0x3E9", "type": "uint8", "min": 25, "max": 99, "description": "Three-Point Shot"},
-      {"name": "罚球", "offset": 1002, "offset_hex": "0x3EA", "type": "uint8", "min": 25, "max": 99, "description": "Free Throw"},
-      {"name": "上篮", "offset": 993, "offset_hex": "0x3E1", "type": "uint8", "min": 25, "max": 99, "description": "Driving Layup"},
-      {"name": "背身单打", "offset": 1003, "offset_hex": "0x3EB", "type": "uint8", "min": 25, "max": 99, "description": "Post Control"},
-      {"name": "传球智商", "offset": 1004, "offset_hex": "0x3EC", "type": "uint8", "min": 25, "max": 99, "description": "Pass IQ"},
-      {"name": "传球准确性", "offset": 1005, "offset_hex": "0x3ED", "type": "uint8", "min": 25, "max": 99, "description": "Pass Accuracy"},
-      {"name": "控球", "offset": 1006, "offset_hex": "0x3EE", "type": "uint8", "min": 25, "max": 99, "description": "Ball Control"},
-      {"name": "传球视野", "offset": 1044, "offset_hex": "0x414", "type": "uint8", "min": 25, "max": 99, "description": "Pass Vision"},
-      {"name": "手感", "offset": 1045, "offset_hex": "0x415", "type": "uint8", "min": 25, "max": 99, "description": "Hands"}
+      {"name": "近距离投篮", "offset": 999, "type": "uint8", "min": 25, "max": 99, "description": "Close Shot"},
+      {"name": "中距离投篮", "offset": 1000, "type": "uint8", "min": 25, "max": 99, "description": "Mid-Range Shot"},
+      {"name": "三分球", "offset": 1001, "type": "uint8", "min": 25, "max": 99, "description": "Three-Point Shot"},
+      {"name": "罚球", "offset": 1002, "type": "uint8", "min": 25, "max": 99, "description": "Free Throw"},
+      {"name": "上篮", "offset": 993, "type": "uint8", "min": 25, "max": 99, "description": "Driving Layup"},
+      {"name": "造犯规", "offset": 998, "type": "uint8", "min": 25, "max": 99, "description": "Draw Foul"},
+      {"name": "背身控制", "offset": 1003, "type": "uint8", "min": 25, "max": 99, "description": "Post Control"},
+      {"name": "背身后仰", "offset": 994, "type": "uint8", "min": 25, "max": 99, "description": "Post Fade"},
+      {"name": "背身勾手", "offset": 996, "type": "uint8", "min": 25, "max": 99, "description": "Post Hook"},
+      {"name": "背身动作", "offset": 997, "type": "uint8", "min": 25, "max": 99, "description": "Post Moves"},
+      {"name": "传球智商", "offset": 1004, "type": "uint8", "min": 25, "max": 99, "description": "Pass IQ"},
+      {"name": "传球准确性", "offset": 1005, "type": "uint8", "min": 25, "max": 99, "description": "Pass Accuracy"},
+      {"name": "控球", "offset": 1006, "type": "uint8", "min": 25, "max": 99, "description": "Ball Control"},
+      {"name": "传球视野", "offset": 1044, "type": "uint8", "min": 25, "max": 99, "description": "Pass Vision"},
+      {"name": "手感", "offset": 1045, "type": "uint8", "min": 25, "max": 99, "description": "Hands"},
+      {"name": "进攻篮板", "offset": 1006, "type": "uint8", "min": 25, "max": 99, "description": "Offensive Rebound"}
     ],
 
     "防守能力": [
-      {"name": "内线防守", "offset": 1008, "offset_hex": "0x3F0", "type": "uint8", "min": 25, "max": 99, "description": "Interior Defense"},
-      {"name": "外线防守", "offset": 1009, "offset_hex": "0x3F1", "type": "uint8", "min": 25, "max": 99, "description": "Perimeter Defense"},
-      {"name": "传球感知", "offset": 1010, "offset_hex": "0x3F2", "type": "uint8", "min": 25, "max": 99, "description": "Pass Perception"},
-      {"name": "抢断", "offset": 1012, "offset_hex": "0x3F4", "type": "uint8", "min": 25, "max": 99, "description": "Steal"},
-      {"name": "盖帽", "offset": 1011, "offset_hex": "0x3F3", "type": "uint8", "min": 25, "max": 99, "description": "Block"},
-      {"name": "防守篮板", "offset": 1007, "offset_hex": "0x3EF", "type": "uint8", "min": 25, "max": 99, "description": "Defensive Rebound"},
-      {"name": "防守稳定性", "offset": 1013, "offset_hex": "0x3F5", "type": "uint8", "min": 25, "max": 99, "description": "Defense Consistency"},
-      {"name": "协防意识", "offset": 1014, "offset_hex": "0x3F6", "type": "uint8", "min": 25, "max": 99, "description": "Help Defense IQ"}
+      {"name": "内线防守", "offset": 1008, "type": "uint8", "min": 25, "max": 99, "description": "Interior Defense"},
+      {"name": "外线防守", "offset": 1009, "type": "uint8", "min": 25, "max": 99, "description": "Perimeter Defense"},
+      {"name": "传球感知", "offset": 1010, "type": "uint8", "min": 25, "max": 99, "description": "Pass Perception"},
+      {"name": "抢断", "offset": 1012, "type": "uint8", "min": 25, "max": 99, "description": "Steal"},
+      {"name": "盖帽", "offset": 1011, "type": "uint8", "min": 25, "max": 99, "description": "Block"},
+      {"name": "防守篮板", "offset": 1007, "type": "uint8", "min": 25, "max": 99, "description": "Defensive Rebound"},
+      {"name": "防守稳定性", "offset": 1013, "type": "uint8", "min": 25, "max": 99, "description": "Defense Consistency"},
+      {"name": "协防意识", "offset": 1014, "type": "uint8", "min": 25, "max": 99, "description": "Help Defense IQ"}
     ],
 
     "体能属性": [
-      {"name": "速度", "offset": 1017, "offset_hex": "0x3F9", "type": "uint8", "min": 25, "max": 99, "description": "Speed"},
-      {"name": "持球速度", "offset": 1018, "offset_hex": "0x3FA", "type": "uint8", "min": 25, "max": 99, "description": "Speed with Ball"},
-      {"name": "弹跳", "offset": 1019, "offset_hex": "0x3FB", "type": "uint8", "min": 25, "max": 99, "description": "Vertical"},
-      {"name": "力量", "offset": 1020, "offset_hex": "0x3FC", "type": "uint8", "min": 25, "max": 99, "description": "Strength"},
-      {"name": "耐力", "offset": 1021, "offset_hex": "0x3FD", "type": "uint8", "min": 25, "max": 99, "description": "Stamina"},
-      {"name": "敏捷", "offset": 1023, "offset_hex": "0x3FF", "type": "uint8", "min": 25, "max": 99, "description": "Agility"},
-      {"name": "扣篮", "offset": 1016, "offset_hex": "0x3F8", "type": "uint8", "min": 25, "max": 99, "description": "Driving Dunk"},
-      {"name": "原地扣篮", "offset": 1015, "offset_hex": "0x3F7", "type": "uint8", "min": 25, "max": 99, "description": "Standing Dunk"}
+      {"name": "速度", "offset": 1017, "type": "uint8", "min": 25, "max": 99, "description": "Speed"},
+      {"name": "持球速度", "offset": 1018, "type": "uint8", "min": 25, "max": 99, "description": "Speed with Ball"},
+      {"name": "弹跳", "offset": 1019, "type": "uint8", "min": 25, "max": 99, "description": "Vertical"},
+      {"name": "力量", "offset": 1020, "type": "uint8", "min": 25, "max": 99, "description": "Strength"},
+      {"name": "耐力", "offset": 1021, "type": "uint8", "min": 25, "max": 99, "description": "Stamina"},
+      {"name": "拼抢", "offset": 1022, "type": "uint8", "min": 25, "max": 99, "description": "Hustle"},
+      {"name": "敏捷", "offset": 1023, "type": "uint8", "min": 25, "max": 99, "description": "Agility"},
+      {"name": "扣篮", "offset": 1016, "type": "uint8", "min": 25, "max": 99, "description": "Driving Dunk"},
+      {"name": "原地扣篮", "offset": 1015, "type": "uint8", "min": 25, "max": 99, "description": "Standing Dunk"}
     ],
 
     "篮球智商": [
-      {"name": "进攻稳定性", "offset": 1025, "offset_hex": "0x401", "type": "uint8", "min": 25, "max": 99, "description": "Offensive Consistency"}
+      {"name": "投篮智商", "offset": 1024, "type": "uint8", "min": 25, "max": 99, "description": "Shot IQ"},
+      {"name": "进攻稳定性", "offset": 1025, "type": "uint8", "min": 25, "max": 99, "description": "Offensive Consistency"},
+      {"name": "无形属性", "offset": 1026, "type": "uint8", "min": 25, "max": 99, "description": "Intangibles"},
+      {"name": "潜力", "offset": 1027, "type": "uint8", "min": 25, "max": 99, "description": "Potential"}
     ],
 
     "潜力与成长": [
-      {"name": "潜力均值", "offset": 746, "offset_hex": "0x2EA", "type": "bitfield", "bit_start": 4, "bit_length": 7, "min": 0, "max": 99, "description": "Average Potential Percent"},
-      {"name": "正向成长率", "offset": 881, "offset_hex": "0x371", "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Boom Percent (positive growth variance)"},
-      {"name": "负向衰退率", "offset": 882, "offset_hex": "0x372", "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Bust Percent (negative growth variance)"}
+      {"name": "潜力均值", "offset": 746, "type": "bitfield", "bit_start": 4, "bit_length": 7, "min": 0, "max": 99, "description": "Avg Potential %"},
+      {"name": "正向成长率", "offset": 881, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Boom % (positive growth)"},
+      {"name": "负向衰退率", "offset": 882, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Bust % (negative growth)"},
+      {"name": "潜力下限", "offset": 880, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Min Potential"},
+      {"name": "潜力上限", "offset": 880, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Max Potential"},
+      {"name": "巅峰开始年龄", "offset": 270, "type": "bitfield", "bit_start": 2, "bit_length": 6, "min": 18, "max": 45, "description": "Peak Start Age"},
+      {"name": "巅峰结束年龄", "offset": 271, "type": "bitfield", "bit_start": 0, "bit_length": 6, "min": 18, "max": 45, "description": "Peak End Age"}
+    ],
+
+    "合同薪资": [
+      {"name": "第1年薪资", "offset": 468, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 1 Salary"},
+      {"name": "第2年薪资", "offset": 472, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 2 Salary"},
+      {"name": "第3年薪资", "offset": 476, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 3 Salary"},
+      {"name": "第4年薪资", "offset": 480, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 4 Salary"},
+      {"name": "第5年薪资", "offset": 484, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 5 Salary"},
+      {"name": "第6年薪资", "offset": 488, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 6 Salary"},
+      {"name": "鸟权年限", "offset": 926, "type": "bitfield", "bit_start": 6, "bit_length": 5, "min": 0, "max": 20, "description": "Bird Years"},
+      {"name": "双向合同剩余天数", "offset": 403, "type": "bitfield", "bit_start": 2, "bit_length": 6, "min": 0, "max": 50, "description": "Two-Way NBA Days Left"}
+    ],
+
+    "球员性格": [
+      {"name": "忠诚度", "offset": 624, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Loyalty"},
+      {"name": "冠军追求", "offset": 625, "type": "bitfield", "bit_start": 4, "bit_length": 7, "min": 0, "max": 99, "description": "Play For Winner"},
+      {"name": "经济安全感", "offset": 626, "type": "bitfield", "bit_start": 3, "bit_length": 7, "min": 0, "max": 99, "description": "Financial Security"}
     ],
 
     "徽章-内线进攻": [
-      {"name": "空中奇才", "offset": 1149, "offset_hex": "0x47D", "type": "bitfield", "bit_start": 4, "bit_length": 3, "min": 0, "max": 7, "description": "Aerial Wizard"},
-      {"name": "抛投大师", "offset": 1148, "offset_hex": "0x47C", "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Float Game"},
-      {"name": "勾手专家", "offset": 1149, "offset_hex": "0x47D", "type": "bitfield", "bit_start": 7, "bit_length": 3, "min": 0, "max": 7, "description": "Hook Specialist"},
-      {"name": "上篮混合大师", "offset": 1158, "offset_hex": "0x486", "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 7, "description": "Layup Mix Master"},
-      {"name": "油漆区天才", "offset": 1158, "offset_hex": "0x486", "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 7, "description": "Paint Prodigy"},
-      {"name": "身体终结者", "offset": 1159, "offset_hex": "0x487", "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Physical Finisher"},
-      {"name": "后仰大师", "offset": 1150, "offset_hex": "0x47E", "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 7, "description": "Post Fade Phenom"},
-      {"name": "背身强攻", "offset": 1159, "offset_hex": "0x487", "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Post Powerhouse"},
-      {"name": "背身诗人", "offset": 1160, "offset_hex": "0x488", "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Post Up Poet"},
-      {"name": "隔扣之王", "offset": 1148, "offset_hex": "0x47C", "type": "bitfield", "bit_start": 6, "bit_length": 3, "min": 0, "max": 7, "description": "Posterizer"},
-      {"name": "起飞", "offset": 1149, "offset_hex": "0x47D", "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 7, "description": "Rise Up"}
+      {"name": "空中奇才", "offset": 1149, "type": "bitfield", "bit_start": 4, "bit_length": 3, "min": 0, "max": 4, "description": "Aerial Wizard"},
+      {"name": "抛投大师", "offset": 1148, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Float Game"},
+      {"name": "勾手专家", "offset": 1149, "type": "bitfield", "bit_start": 7, "bit_length": 3, "min": 0, "max": 4, "description": "Hook Specialist"},
+      {"name": "上篮混合大师", "offset": 1158, "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 4, "description": "Layup Mix Master"},
+      {"name": "油漆区天才", "offset": 1158, "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 4, "description": "Paint Prodigy"},
+      {"name": "身体终结者", "offset": 1159, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Physical Finisher"},
+      {"name": "后仰大师", "offset": 1150, "type": "bitfield", "bit_start": 2, "bit_length": 3, "min": 0, "max": 4, "description": "Post Fade Phenom"},
+      {"name": "背身强攻", "offset": 1159, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Post Powerhouse"},
+      {"name": "背身诗人", "offset": 1160, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Post Up Poet"},
+      {"name": "隔扣之王", "offset": 1148, "type": "bitfield", "bit_start": 6, "bit_length": 3, "min": 0, "max": 4, "description": "Posterizer"},
+      {"name": "起飞", "offset": 1149, "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 4, "description": "Rise Up"}
     ],
 
     "徽章-外线投篮": [
-      {"name": "死神之眼", "offset": 1150, "offset_hex": "0x47E", "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 7, "description": "Deadeye"},
-      {"name": "无限射程", "offset": 1151, "offset_hex": "0x47F", "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Limitless Range"},
-      {"name": "迷你神射手", "offset": 1160, "offset_hex": "0x488", "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Mini Marksman"},
-      {"name": "灵活射手", "offset": 1161, "offset_hex": "0x489", "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 7, "description": "Shifty Shooter"},
-      {"name": "无球跑位", "offset": 1151, "offset_hex": "0x47F", "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Slippery Off-Ball"}
+      {"name": "死神之眼", "offset": 1150, "type": "bitfield", "bit_start": 5, "bit_length": 3, "min": 0, "max": 4, "description": "Deadeye"},
+      {"name": "无限射程", "offset": 1151, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Limitless Range"},
+      {"name": "迷你神射手", "offset": 1160, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Mini Marksman"},
+      {"name": "灵活射手", "offset": 1161, "type": "bitfield", "bit_start": 1, "bit_length": 3, "min": 0, "max": 4, "description": "Shifty Shooter"},
+      {"name": "无球跑位", "offset": 1151, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 4, "description": "Slippery Off-Ball"}
     ],
 
     "徽章-组织": [
-      {"name": "绝境传球", "offset": 1152, "offset_hex": "0x480", "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 7, "description": "Bailout"}
+      {"name": "绝境传球", "offset": 1152, "type": "bitfield", "bit_start": 0, "bit_length": 3, "min": 0, "max": 4, "description": "Bailout"}
+    ],
+
+    "投篮倾向": [
+      {"name": "篮下出手", "offset": 1060, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Shot Under Basket"},
+      {"name": "近距离出手", "offset": 1062, "type": "bitfield", "bit_start": 5, "bit_length": 6, "min": 0, "max": 99, "description": "Shot Close"},
+      {"name": "中距离出手", "offset": 1065, "type": "bitfield", "bit_start": 6, "bit_length": 6, "min": 0, "max": 99, "description": "Shot Mid"},
+      {"name": "三分出手", "offset": 1073, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Shot 3pt"},
+      {"name": "干拔三分", "offset": 1080, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Contested 3pt"},
+      {"name": "干拔中距离", "offset": 1081, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Contested Mid"},
+      {"name": "急停跳投三分", "offset": 1082, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Stepback 3pt"},
+      {"name": "突破急停三分", "offset": 1086, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Drive Pull Up 3pt"},
+      {"name": "突破急停中距离", "offset": 1088, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Drive Pull Up Mid"},
+      {"name": "转换进攻三分", "offset": 1085, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Transition Pull Up 3pt"},
+      {"name": "借掩护三分", "offset": 1074, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Off Screen 3pt"}
+    ],
+
+    "上篮扣篮倾向": [
+      {"name": "突破上篮倾向", "offset": 1048, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Driving Layup Tendency"},
+      {"name": "原地扣篮倾向", "offset": 1048, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Standing Dunk Tendency"},
+      {"name": "突破扣篮倾向", "offset": 1049, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Driving Dunk Tendency"},
+      {"name": "花式扣篮", "offset": 1050, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Flashy Dunk"},
+      {"name": "空接", "offset": 1052, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Alley-Oop"},
+      {"name": "补篮", "offset": 1052, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Putback"},
+      {"name": "冲抢", "offset": 1053, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Crash"},
+      {"name": "欧洲步", "offset": 1056, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Euro Step"},
+      {"name": "跳步上篮", "offset": 1056, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Hop Step Layup"},
+      {"name": "抛投", "offset": 1057, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Floater"},
+      {"name": "转身上篮", "offset": 1054, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Spin Layup"},
+      {"name": "顺步投篮", "offset": 1058, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Step Through Shot"}
+    ],
+
+    "突破与运球倾向": [
+      {"name": "突破倾向", "offset": 1089, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Drive"},
+      {"name": "定点突破", "offset": 1090, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Spot Up Drive"},
+      {"name": "向右突破", "offset": 1092, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Drive Right"},
+      {"name": "借掩护突破", "offset": 1092, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Off Screen Drive"},
+      {"name": "犹豫步突破", "offset": 1106, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Driving Hesitation"},
+      {"name": "背后运球", "offset": 1105, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Behind The Back"},
+      {"name": "双交叉运球", "offset": 1104, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Double Crossover"},
+      {"name": "半转身运球", "offset": 1104, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Half Spin"},
+      {"name": "In-Out运球", "offset": 1108, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "In And Out"},
+      {"name": "后撤步突破", "offset": 1102, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Step Back"},
+      {"name": "强攻倾向", "offset": 1109, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Attack Strong"}
+    ],
+
+    "传球与组织倾向": [
+      {"name": "分球给空位", "offset": 1112, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Dish To Open Man"},
+      {"name": "花式传球", "offset": 1136, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Flashy Pass"},
+      {"name": "空接传球", "offset": 1137, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Alley Oop Pass"}
+    ],
+
+    "防守倾向": [
+      {"name": "封盖倾向", "offset": 1142, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Block Shot"},
+      {"name": "干扰投篮", "offset": 1141, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Contest Shot"},
+      {"name": "犯规", "offset": 1144, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Foul"},
+      {"name": "恶意犯规", "offset": 1144, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Hard Foul"},
+      {"name": "持球抢断", "offset": 1140, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "On Ball Steal"},
+      {"name": "传球拦截", "offset": 1138, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Pass Interception"},
+      {"name": "造进攻犯规", "offset": 1140, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Take Charge"}
+    ],
+
+    "背身倾向": [
+      {"name": "背身面框", "offset": 1121, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Post Face Up"},
+      {"name": "背身压迫", "offset": 1122, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Post Back Down"},
+      {"name": "背身投篮", "offset": 1124, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Shoot From Post"},
+      {"name": "背身突破", "offset": 1132, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Post Drive"},
+      {"name": "背身转身", "offset": 1133, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Post Spin"},
+      {"name": "背身后仰左", "offset": 1128, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Post Fade Left"},
+      {"name": "背身后仰右", "offset": 1128, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Post Fade Right"},
+      {"name": "背身勾手左", "offset": 1125, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Post Hook Left"},
+      {"name": "背身勾手右", "offset": 1126, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Post Hook Right"},
+      {"name": "背身垫步", "offset": 1134, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Post Drop Step"},
+      {"name": "背身跳步投篮", "offset": 1130, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Post Hop Shot"},
+      {"name": "背身跳步", "offset": 1136, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Post Hop Step"},
+      {"name": "背身后撤步", "offset": 1132, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Post Step Back"},
+      {"name": "背身虚晃", "offset": 1120, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Post Shimmy"},
+      {"name": "背身上下晃", "offset": 1129, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Post Up And Under"}
+    ],
+
+    "自由球风格": [
+      {"name": "球权占比", "offset": 1112, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "Touches"},
+      {"name": "挡拆顺下vs外弹", "offset": 1113, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "Roll Vs Pop"},
+      {"name": "转换定点", "offset": 1114, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "Transition Spot Up"},
+      {"name": "单挑-弱防守", "offset": 1118, "type": "bitfield", "bit_start": 5, "bit_length": 7, "min": 0, "max": 99, "description": "ISO vs Poor Defender"},
+      {"name": "单挑-中等防守", "offset": 1117, "type": "bitfield", "bit_start": 6, "bit_length": 7, "min": 0, "max": 99, "description": "ISO vs Average Defender"},
+      {"name": "单挑-强防守", "offset": 1116, "type": "bitfield", "bit_start": 7, "bit_length": 7, "min": 0, "max": 99, "description": "ISO vs Good Defender"},
+      {"name": "单挑-顶级防守", "offset": 1116, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "ISO vs Elite Defender"},
+      {"name": "战术纪律", "offset": 1120, "type": "bitfield", "bit_start": 0, "bit_length": 7, "min": 0, "max": 99, "description": "Play Discipline"}
+    ],
+
+    "耐久性": [
+      {"name": "头部耐久", "offset": 1028, "type": "uint8", "min": 25, "max": 99, "description": "Head Durability"},
+      {"name": "颈部耐久", "offset": 1029, "type": "uint8", "min": 25, "max": 99, "description": "Neck Durability"},
+      {"name": "背部耐久", "offset": 1030, "type": "uint8", "min": 25, "max": 99, "description": "Back Durability"},
+      {"name": "左肩耐久", "offset": 1031, "type": "uint8", "min": 25, "max": 99, "description": "Left Shoulder"},
+      {"name": "右肩耐久", "offset": 1032, "type": "uint8", "min": 25, "max": 99, "description": "Right Shoulder"},
+      {"name": "左肘耐久", "offset": 1033, "type": "uint8", "min": 25, "max": 99, "description": "Left Elbow"},
+      {"name": "右肘耐久", "offset": 1034, "type": "uint8", "min": 25, "max": 99, "description": "Right Elbow"},
+      {"name": "左髋耐久", "offset": 1035, "type": "uint8", "min": 25, "max": 99, "description": "Left Hip"},
+      {"name": "右髋耐久", "offset": 1036, "type": "uint8", "min": 25, "max": 99, "description": "Right Hip"},
+      {"name": "左膝耐久", "offset": 1037, "type": "uint8", "min": 25, "max": 99, "description": "Left Knee"},
+      {"name": "右膝耐久", "offset": 1038, "type": "uint8", "min": 25, "max": 99, "description": "Right Knee"},
+      {"name": "左踝耐久", "offset": 1039, "type": "uint8", "min": 25, "max": 99, "description": "Left Ankle"},
+      {"name": "右踝耐久", "offset": 1040, "type": "uint8", "min": 25, "max": 99, "description": "Right Ankle"},
+      {"name": "左脚耐久", "offset": 1041, "type": "uint8", "min": 25, "max": 99, "description": "Left Foot"},
+      {"name": "右脚耐久", "offset": 1042, "type": "uint8", "min": 25, "max": 99, "description": "Right Foot"},
+      {"name": "其他耐久", "offset": 1043, "type": "uint8", "min": 25, "max": 99, "description": "Misc Durability"}
     ]
   }
 }
