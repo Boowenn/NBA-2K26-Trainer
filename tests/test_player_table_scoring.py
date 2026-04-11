@@ -63,6 +63,17 @@ class FakeMemory:
         mask = (1 << bit_length) - 1
         return (value >> shift) & mask
 
+    def write_bitfield(self, address: int, bit_start: int, bit_length: int, value: int) -> None:
+        byte_offset = bit_start // 8
+        total_bits = bit_start % 8 + bit_length
+        total_bytes = (total_bits + 7) // 8
+        current = self.read_bytes(address + byte_offset, total_bytes) or b"\x00" * total_bytes
+        current_value = int.from_bytes(current, byteorder="little")
+        shift = bit_start % 8
+        mask = ((1 << bit_length) - 1) << shift
+        new_value = (current_value & ~mask) | ((value << shift) & mask)
+        self.write_bytes_at(address + byte_offset, new_value.to_bytes(total_bytes, byteorder="little"))
+
 
 class PlayerTableScoringTests(unittest.TestCase):
     def setUp(self):
@@ -82,6 +93,8 @@ class PlayerTableScoringTests(unittest.TestCase):
         last_name: str,
         birth_year: int | None,
         overall: int | None = None,
+        live_overall_418: int | None = None,
+        live_overall_1028: int | None = None,
         team_ptr: int = 0,
         team_ptr_offset: int = 96,
     ) -> None:
@@ -94,6 +107,10 @@ class PlayerTableScoringTests(unittest.TestCase):
             self.mem.write_bytes_at(record_address + 266, birth_year.to_bytes(2, byteorder="little"))
         if overall is not None:
             self.mem.write_bytes_at(record_address + 1047, bytes([overall]))
+        if live_overall_418 is not None:
+            self.mem.write_bitfield(record_address + 418, 1, 7, live_overall_418)
+        if live_overall_1028 is not None:
+            self.mem.write_bitfield(record_address + 1028, 1, 7, live_overall_1028)
 
     def _write_team_record(self, address: int, name: str) -> None:
         self.mem.write_bytes_at(address + self.config.team_table.team_name_offset, _encode_wstring(name))
@@ -274,6 +291,119 @@ class PlayerTableScoringTests(unittest.TestCase):
         )
 
         self.assertEqual(best, NOISE_TABLE_BASE)
+
+    def test_resolve_live_team_ptr_offset_prefers_current_team_assignments(self):
+        current_teams = [
+            (0x950000, "Lakers"),
+            (0x951000, "Warriors"),
+            (0x952000, "Celtics"),
+            (0x953000, "Bulls"),
+        ]
+        base_teams = [
+            (0x960000, "Lakers"),
+            (0x961000, "Warriors"),
+        ]
+
+        for address, name in current_teams + base_teams:
+            self._write_team_record(address, name)
+
+        current_players = [
+            ("Luka", "Doncic", 1999, current_teams[0][0]),
+            ("Austin", "Reaves", 1998, current_teams[0][0]),
+            ("Stephen", "Curry", 1988, current_teams[1][0]),
+            ("Jayson", "Tatum", 1998, current_teams[2][0]),
+            ("Michael", "Jordan", 1963, current_teams[3][0]),
+            ("Scottie", "Pippen", 1965, current_teams[3][0]),
+        ]
+        base_players = [
+            ("Luka", "Doncic", 1999, base_teams[0][0]),
+            ("Austin", "Reaves", 1998, base_teams[0][0]),
+            ("Stephen", "Curry", 1988, base_teams[1][0]),
+            ("LeBron", "James", 1984, base_teams[1][0]),
+            ("Kevin", "Durant", 1988, base_teams[1][0]),
+            ("Nikola", "Jokic", 1995, base_teams[1][0]),
+        ]
+
+        for index in range(24):
+            first_name, last_name, birth_year, current_team_ptr = current_players[index % len(current_players)]
+            _, _, _, base_team_ptr = base_players[index % len(base_players)]
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=80,
+                team_ptr=current_team_ptr,
+                team_ptr_offset=96,
+            )
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=80,
+                team_ptr=base_team_ptr,
+                team_ptr_offset=184,
+            )
+
+        self.pm._live_team_ptr_offset_cache.clear()
+        best_offset, _ = self.pm._resolve_live_team_ptr_offset(PLAYER_TABLE_BASE, None)
+
+        self.assertEqual(best_offset, 96)
+
+    def test_resolve_live_overall_attr_prefers_current_save_display_field(self):
+        current_players = [
+            ("Luka", "Doncic", 1999, 99, 99),
+            ("Austin", "Reaves", 1998, 58, 80),
+            ("Herbert", "Jones", 1998, 40, 80),
+            ("Daniel", "Gafford", 1998, 45, 79),
+            ("Nick", "Smith Jr.", 2004, 62, 81),
+            ("Bronny", "James Jr.", 2004, 45, 77),
+        ]
+
+        for index in range(24):
+            first_name, last_name, birth_year, raw_overall, live_overall = current_players[index % len(current_players)]
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=raw_overall,
+                live_overall_418=live_overall,
+                live_overall_1028=82,
+            )
+
+        live_attr = self.pm._resolve_live_overall_attr(PLAYER_TABLE_BASE)
+        self.assertIsNotNone(live_attr)
+        self.assertEqual(live_attr.offset, 418)
+        self.assertEqual(live_attr.type, "bitfield")
+
+        self.pm.set_roster_mode("current")
+        self.pm._table_base = PLAYER_TABLE_BASE
+        players = self.pm.scan_players()
+        players_by_name = {player.full_name: player for player in players}
+        overall_attr = self.config.find_attribute_by_description("Overall Rating")
+
+        self.assertEqual(players_by_name["Austin Reaves"].overall, 80)
+        self.assertEqual(players_by_name["Herbert Jones"].overall, 80)
+        self.assertEqual(players_by_name["Daniel Gafford"].overall, 79)
+        self.assertEqual(self.pm.read_attribute(players_by_name["Austin Reaves"], overall_attr), 80)
+
+    def test_begin_refresh_keeps_fast_caches_until_force_rescan(self):
+        overall_attr = self.config.find_attribute_by_description("Overall Rating")
+        self.pm._module_ref_count_cache[PLAYER_TABLE_BASE] = 42
+        self.pm._live_overall_attr_cache[PLAYER_TABLE_BASE] = (overall_attr, 1234)
+
+        self.pm.begin_refresh(force_rescan=False)
+        self.assertEqual(self.pm._module_ref_count_cache[PLAYER_TABLE_BASE], 42)
+        self.assertIn(PLAYER_TABLE_BASE, self.pm._live_overall_attr_cache)
+
+        self.pm.begin_refresh(force_rescan=True)
+        self.assertNotIn(PLAYER_TABLE_BASE, self.pm._module_ref_count_cache)
+        self.assertNotIn(PLAYER_TABLE_BASE, self.pm._live_overall_attr_cache)
 
 
 if __name__ == "__main__":

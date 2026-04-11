@@ -238,8 +238,7 @@ class MainWindow(QMainWindow):
         from PyQt5.QtWidgets import QApplication
         QApplication.processEvents()
 
-        # Reset cached table base so it re-scans
-        self.player_mgr._table_base = None
+        self.player_mgr.begin_refresh(force_rescan=False)
         self.player_mgr.set_roster_mode(self.roster_mode)
 
         def progress(msg):

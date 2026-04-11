@@ -21,6 +21,11 @@ ROSTER_HINT_SAMPLE_SIZE = 160
 TEAM_TABLE_SAMPLE_SIZE = 40
 MODULE_REF_CHUNK_SIZE = 0x400000
 ACTIVE_TABLE_MIN_MODULE_REFS = 24
+CACHED_TABLE_MIN_MODULE_REFS = 8
+DETAILED_MODULE_REF_CANDIDATE_LIMIT = 8
+LIVE_OVERALL_SAMPLE_SIZE = 160
+LIVE_OVERALL_TARGET_MEAN = 76.0
+LIVE_OVERALL_TARGET_STDDEV = 7.0
 FREE_AGENT_TEAM_ID = -2
 UNKNOWN_TEAM_ID = -3
 PACKED_RATING_OFFSET_MIN = 993
@@ -127,6 +132,31 @@ MODERN_FULL_NAMES = {
     ("Dorian", "Finney-Smith"),
     ("Jordan", "Goodwin"),
 }
+
+LIVE_OVERALL_ATTR_CANDIDATES = (
+    AttributeDef(
+        name="Live Overall Rating (bit418)",
+        offset=418,
+        type="bitfield",
+        bit_start=1,
+        bit_length=7,
+        min_val=0,
+        max_val=99,
+        category="Misc",
+        description="Live Overall Rating",
+    ),
+    AttributeDef(
+        name="Live Overall Rating (bit1028)",
+        offset=1028,
+        type="bitfield",
+        bit_start=1,
+        bit_length=7,
+        min_val=0,
+        max_val=99,
+        category="Misc",
+        description="Live Overall Rating Alt",
+    ),
+)
 
 
 @dataclass
@@ -258,6 +288,8 @@ class PlayerManager:
         self._birth_year_attr: Optional[AttributeDef] = None
         self._module_scan_ranges: Optional[List[Tuple[int, int]]] = None
         self._team_ptr_offset_cache: Dict[int, Tuple[int, int]] = {}
+        self._live_team_ptr_offset_cache: Dict[int, Tuple[int, int]] = {}
+        self._live_overall_attr_cache: Dict[int, Tuple[AttributeDef, int]] = {}
         self._module_ref_count_cache: Dict[int, int] = {}
 
     def set_roster_mode(self, mode: str) -> None:
@@ -269,7 +301,44 @@ class PlayerManager:
         self.roster_mode = mode
         self._table_base = None
         self._team_ptr_offset_cache.clear()
+        self._live_team_ptr_offset_cache.clear()
+        self._live_overall_attr_cache.clear()
         self._module_ref_count_cache.clear()
+
+    def begin_refresh(self, *, force_rescan: bool = False) -> None:
+        if force_rescan:
+            self._table_base = None
+            self._team_table_base = None
+            self._team_ptr_offset_cache.clear()
+            self._live_team_ptr_offset_cache.clear()
+            self._live_overall_attr_cache.clear()
+            self._module_ref_count_cache.clear()
+
+    def _is_cached_table_base_valid(self, table_base: int) -> bool:
+        pt = self.config.player_table
+        valid_names = 0
+
+        for index in range(min(8, pt.max_players)):
+            record_address = table_base + index * pt.stride
+            last_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.last_name_offset, pt.name_string_length)
+            )
+            first_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.first_name_offset, pt.name_string_length)
+            )
+            if _is_valid_name(first_name) or _is_valid_name(last_name):
+                valid_names += 1
+
+        if valid_names < 3:
+            return False
+
+        if self.roster_mode == "auto":
+            config_candidates = {base for base, _ in self._get_config_player_table_candidates()}
+            if config_candidates and table_base not in config_candidates:
+                return self._count_module_pointer_refs(table_base) >= ACTIVE_TABLE_MIN_MODULE_REFS
+            return self._count_module_pointer_refs(table_base) >= CACHED_TABLE_MIN_MODULE_REFS
+
+        return True
 
     def _get_module_scan_ranges(self) -> List[Tuple[int, int]]:
         if self._module_scan_ranges is not None:
@@ -365,11 +434,21 @@ class PlayerManager:
             self._birth_year_attr = self._find_attribute(("出生年份",), "Birth Year")
         return self._birth_year_attr
 
+    def _is_overall_attr(self, attr: Optional[AttributeDef]) -> bool:
+        return bool(attr) and attr.description.strip().lower() == "overall rating"
+
+    def _get_table_base_for_player(self, player: Player) -> Optional[int]:
+        if self._table_base is not None:
+            return self._table_base
+        if player.index < 0:
+            return None
+        return player.record_address - player.index * self.config.player_table.stride
+
     def _read_value_at(self, record_address: int, attr: Optional[AttributeDef]) -> Optional[Any]:
         if attr is None:
             return None
         player = Player(index=-1, record_address=record_address)
-        return self.read_attribute(player, attr)
+        return self._read_attribute_direct(player, attr)
 
     def _is_live_packed_rating_attr(self, attr: AttributeDef) -> bool:
         return (
@@ -490,6 +569,35 @@ class PlayerManager:
         if _is_pointer_like(nested):
             candidates.append((int(nested), f"{source} -> deref"))
 
+    def _get_config_player_table_candidates(self) -> List[Tuple[int, str]]:
+        pt = self.config.player_table
+        candidates: List[Tuple[int, str]] = []
+
+        if pt.direct_table and pt.base_pointer > 0:
+            self._append_pointer_candidates(
+                candidates,
+                self.mem.read_uint64(self.mem.base_address + pt.base_pointer),
+                f"module_base + 0x{pt.base_pointer:X}",
+            )
+            self._append_pointer_candidates(
+                candidates,
+                self.mem.read_uint64(pt.base_pointer),
+                f"absolute 0x{pt.base_pointer:X}",
+            )
+
+        if pt.pointer_offsets:
+            pointer_chain = self.mem.resolve_pointer_chain(self.mem.base_address, pt.pointer_offsets)
+            self._append_pointer_candidates(candidates, pointer_chain, "pointer chain")
+
+        unique_candidates: List[Tuple[int, str]] = []
+        seen = set()
+        for base, source in candidates:
+            if base in seen:
+                continue
+            seen.add(base)
+            unique_candidates.append((base, source))
+        return unique_candidates
+
     def _count_roster_name_hits(self, table_base: int) -> Tuple[int, int]:
         pt = self.config.player_table
         legend_hits = 0
@@ -600,13 +708,162 @@ class PlayerManager:
         self._team_ptr_offset_cache[table_base] = result
         return result
 
-    def _score_player_table_base(self, table_base: int) -> TableMetrics:
+    def _score_live_team_ptr_offset(
+        self,
+        table_base: int,
+        team_ptr_offset: int,
+        team_table_base: Optional[int],
+    ) -> int:
+        player_table = self.config.player_table
+        named_players = 0
+        team_name_counts: Counter[str] = Counter()
+
+        for index in range(player_table.max_players):
+            record_address = table_base + index * player_table.stride
+            last_name = _normalize_text(
+                self.mem.read_wstring(
+                    record_address + player_table.last_name_offset,
+                    player_table.name_string_length,
+                )
+            )
+            first_name = _normalize_text(
+                self.mem.read_wstring(
+                    record_address + player_table.first_name_offset,
+                    player_table.name_string_length,
+                )
+            )
+            if not first_name and not last_name:
+                continue
+
+            team_ptr = self.mem.read_uint64(record_address + team_ptr_offset)
+            team_name = self._read_team_name_from_pointer(team_ptr, team_table_base)
+            if team_name:
+                named_players += 1
+                team_name_counts[team_name] += 1
+
+        if named_players == 0:
+            return -10**9
+
+        return named_players * 2 + len(team_name_counts) * 10
+
+    def _resolve_live_team_ptr_offset(
+        self, table_base: int, team_table_base: Optional[int]
+    ) -> Tuple[int, int]:
+        cached = self._live_team_ptr_offset_cache.get(table_base)
+        if cached is not None:
+            return cached
+
+        best_offset = TEAM_PTR_OFFSET
+        best_score = -10**9
+        for candidate_offset in TEAM_PTR_OFFSET_CANDIDATES:
+            score = self._score_live_team_ptr_offset(table_base, candidate_offset, team_table_base)
+            if score > best_score or (score == best_score and candidate_offset < best_offset):
+                best_offset = candidate_offset
+                best_score = score
+
+        result = (best_offset, best_score)
+        self._live_team_ptr_offset_cache[table_base] = result
+        return result
+
+    def _iter_live_overall_candidates(self) -> List[AttributeDef]:
+        candidates: List[AttributeDef] = []
+        overall_attr = self._get_overall_attr()
+        if overall_attr is not None:
+            candidates.append(overall_attr)
+        candidates.extend(LIVE_OVERALL_ATTR_CANDIDATES)
+        return candidates
+
+    def _score_live_overall_attr(self, table_base: int, attr: AttributeDef) -> int:
+        pt = self.config.player_table
+        valid_values: List[int] = []
+        named_values: List[int] = []
+        low_named = 0
+        low_all = 0
+
+        for index in range(min(LIVE_OVERALL_SAMPLE_SIZE, pt.max_players)):
+            record_address = table_base + index * pt.stride
+            last_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.last_name_offset, pt.name_string_length)
+            )
+            first_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.first_name_offset, pt.name_string_length)
+            )
+            if not first_name and not last_name:
+                continue
+
+            value = self._read_value_at(record_address, attr)
+            if not isinstance(value, int) or not (25 <= value <= 99):
+                continue
+
+            valid_values.append(value)
+            if value < 50:
+                low_all += 1
+
+            full_name = (first_name, last_name)
+            if full_name in MODERN_FULL_NAMES or full_name in LEGEND_FULL_NAMES:
+                named_values.append(value)
+                if value < 70:
+                    low_named += 1
+
+        if len(valid_values) < 8:
+            return -10**9
+
+        average = sum(valid_values) / len(valid_values)
+        variance = sum((value - average) ** 2 for value in valid_values) / len(valid_values)
+        stddev = variance ** 0.5
+        named_high = sum(value >= 80 for value in named_values)
+        named_elite = sum(value >= 90 for value in named_values)
+
+        score = len(valid_values) * 6
+        score += len(named_values) * 18
+        score += named_high * 8
+        score += named_elite * 5
+        score -= low_named * 40
+        score -= int(round(abs(average - LIVE_OVERALL_TARGET_MEAN) * 14))
+        score -= int(round(abs(stddev - LIVE_OVERALL_TARGET_STDDEV) * 8))
+
+        low_all_threshold = max(4, len(valid_values) // 6)
+        if low_all > low_all_threshold:
+            score -= (low_all - low_all_threshold) * 8
+
+        return score
+
+    def _resolve_live_overall_attr(self, table_base: Optional[int]) -> Optional[AttributeDef]:
+        if table_base is None:
+            return self._get_overall_attr()
+
+        cached = self._live_overall_attr_cache.get(table_base)
+        if cached is not None:
+            return cached[0]
+
+        candidates = self._iter_live_overall_candidates()
+        if not candidates:
+            return None
+
+        best_attr = candidates[0]
+        best_score = -10**9
+        for candidate in candidates:
+            score = self._score_live_overall_attr(table_base, candidate)
+            if score > best_score:
+                best_attr = candidate
+                best_score = score
+
+        self._live_overall_attr_cache[table_base] = (best_attr, best_score)
+        return best_attr
+
+    def _score_player_table_base(
+        self,
+        table_base: int,
+        *,
+        include_module_refs: bool = True,
+    ) -> TableMetrics:
         metrics = TableMetrics()
         pt = self.config.player_table
-        overall_attr = self._get_overall_attr()
+        overall_attr = self._resolve_live_overall_attr(table_base)
         birth_year_attr = self._get_birth_year_attr()
         team_table_base = self._resolve_team_table_base()
-        metrics.module_ref_count = self._count_module_pointer_refs(table_base)
+        if include_module_refs:
+            metrics.module_ref_count = self._count_module_pointer_refs(table_base)
         metrics.team_ptr_offset, metrics.team_ptr_quality = self._resolve_team_ptr_offset(
             table_base, team_table_base
         )
@@ -698,7 +955,11 @@ class PlayerManager:
         return True
 
     def _pick_best_player_table(
-        self, candidates: List[Tuple[int, str]], progress_callback=None
+        self,
+        candidates: List[Tuple[int, str]],
+        progress_callback=None,
+        *,
+        include_module_refs: bool = True,
     ) -> Optional[int]:
         seen = set()
         profiled_candidates: List[Tuple[int, str, TableMetrics]] = []
@@ -708,7 +969,7 @@ class PlayerManager:
                 continue
             seen.add(base)
 
-            metrics = self._score_player_table_base(base)
+            metrics = self._score_player_table_base(base, include_module_refs=False)
             profiled_candidates.append((base, source, metrics))
             if progress_callback:
                 progress_callback(
@@ -718,7 +979,7 @@ class PlayerManager:
                     f"birth={metrics.valid_birth_year}, teams={metrics.valid_team_refs}, "
                     f"team_off=0x{metrics.team_ptr_offset:X}, team_q={metrics.team_ptr_quality}, "
                     f"legend={metrics.legend_hits}, modern={metrics.modern_hits}, "
-                    f"module_refs={metrics.module_ref_count}, "
+                    "module_refs=pending, "
                     f"score={metrics.score})"
                 )
 
@@ -730,6 +991,41 @@ class PlayerManager:
 
         if not promising:
             return None
+
+        def preliminary_rank(entry: Tuple[int, str, TableMetrics]) -> Tuple[int, int, int]:
+            _, source, metrics = entry
+            source_bonus = 25 if "module_base" in source else 0
+            return (
+                metrics.selection_score + source_bonus,
+                metrics.team_ptr_quality,
+                metrics.valid_names,
+            )
+
+        if include_module_refs:
+            detailed_candidates = sorted(
+                promising,
+                key=preliminary_rank,
+                reverse=True,
+            )[:DETAILED_MODULE_REF_CANDIDATE_LIMIT]
+            rescored_metrics: Dict[int, TableMetrics] = {}
+
+            for base, source, _ in detailed_candidates:
+                rescored = self._score_player_table_base(base, include_module_refs=True)
+                rescored_metrics[base] = rescored
+                if progress_callback:
+                    progress_callback(
+                        "Detailed player table candidate "
+                        f"{source}: 0x{base:X} "
+                        f"(team_off=0x{rescored.team_ptr_offset:X}, "
+                        f"team_q={rescored.team_ptr_quality}, legend={rescored.legend_hits}, "
+                        f"modern={rescored.modern_hits}, module_refs={rescored.module_ref_count}, "
+                        f"score={rescored.score})"
+                    )
+
+            promising = [
+                (base, source, rescored_metrics.get(base, metrics))
+                for base, source, metrics in promising
+            ]
 
         def candidate_rank(entry: Tuple[int, str, TableMetrics]) -> Tuple[int, int, int, int, int]:
             _, source, metrics = entry
@@ -791,48 +1087,33 @@ class PlayerManager:
 
     def _resolve_table_base(self, progress_callback=None) -> Optional[int]:
         if self._table_base is not None:
-            return self._table_base
+            if self._is_cached_table_base_valid(self._table_base):
+                if progress_callback:
+                    progress_callback(f"Using cached player table: 0x{self._table_base:X}")
+                return self._table_base
+            self._table_base = None
 
         pt = self.config.player_table
-        candidates: List[Tuple[int, str]] = []
+        candidates = self._get_config_player_table_candidates()
 
-        if pt.direct_table and pt.base_pointer > 0:
-            self._append_pointer_candidates(
-                candidates,
-                self.mem.read_uint64(self.mem.base_address + pt.base_pointer),
-                f"module_base + 0x{pt.base_pointer:X}",
-            )
-            self._append_pointer_candidates(
-                candidates,
-                self.mem.read_uint64(pt.base_pointer),
-                f"absolute 0x{pt.base_pointer:X}",
-            )
-
-        if pt.pointer_offsets:
-            pointer_chain = self.mem.resolve_pointer_chain(self.mem.base_address, pt.pointer_offsets)
-            self._append_pointer_candidates(candidates, pointer_chain, "pointer chain")
-
-        best_base = self._pick_best_player_table(candidates, progress_callback)
+        best_base = self._pick_best_player_table(
+            candidates,
+            progress_callback,
+            include_module_refs=False,
+        )
         if best_base is not None:
-            best_metrics = self._score_player_table_base(best_base)
-            config_candidate_is_active = (
-                self.roster_mode != "auto"
-                or best_metrics.module_ref_count >= ACTIVE_TABLE_MIN_MODULE_REFS
+            best_metrics = self._score_player_table_base(
+                best_base,
+                include_module_refs=False,
             )
-            if self._matches_requested_roster_mode(best_metrics) and config_candidate_is_active:
+            if self._matches_requested_roster_mode(best_metrics):
                 self._table_base = best_base
                 return best_base
             if progress_callback:
-                if self.roster_mode == "auto" and best_metrics.module_ref_count < ACTIVE_TABLE_MIN_MODULE_REFS:
-                    progress_callback(
-                        "Configured pointers found a roster table, but it does not look like the active save roster. "
-                        "Scanning memory for a more active table..."
-                    )
-                else:
-                    progress_callback(
-                        "Configured pointers found a roster table, but it does not match the selected roster mode. "
-                        "Scanning memory for a better match..."
-                    )
+                progress_callback(
+                    "Configured pointers found a roster table, but it does not match the selected roster mode. "
+                    "Scanning memory for a better match..."
+                )
 
         if progress_callback:
             progress_callback("Config pointers did not validate. Scanning memory for a better player table...")
@@ -1002,12 +1283,12 @@ class PlayerManager:
             return []
 
         team_table_base = self._resolve_team_table_base(progress_callback)
-        team_ptr_offset, _ = self._resolve_team_ptr_offset(self._table_base, team_table_base)
+        team_ptr_offset, _ = self._resolve_live_team_ptr_offset(self._table_base, team_table_base)
         player_table = self.config.player_table
         players: List[Player] = []
         team_cache: Dict[int, Tuple[str, int]] = {}
         next_dynamic_team_id = 1000
-        overall_attr = self._get_overall_attr()
+        overall_attr = self._resolve_live_overall_attr(self._table_base)
         birth_year_attr = self._get_birth_year_attr()
 
         for index in range(player_table.max_players):
@@ -1053,7 +1334,7 @@ class PlayerManager:
         self.players = players
         return players
 
-    def read_attribute(self, player: Player, attr: AttributeDef) -> Optional[Any]:
+    def _read_attribute_direct(self, player: Player, attr: AttributeDef) -> Optional[Any]:
         address = player.record_address + attr.offset
         attr_type = attr.type
 
@@ -1095,7 +1376,13 @@ class PlayerManager:
             return self.mem.read_ascii(address, attr.string_length)
         return None
 
-    def write_attribute(self, player: Player, attr: AttributeDef, value: Any) -> bool:
+    def read_attribute(self, player: Player, attr: AttributeDef) -> Optional[Any]:
+        resolved_attr = attr
+        if self._is_overall_attr(attr):
+            resolved_attr = self._resolve_live_overall_attr(self._get_table_base_for_player(player)) or attr
+        return self._read_attribute_direct(player, resolved_attr)
+
+    def _write_attribute_direct(self, player: Player, attr: AttributeDef, value: Any) -> bool:
         address = player.record_address + attr.offset
         attr_type = attr.type
         effective_max = self._effective_attr_max(attr)
@@ -1137,6 +1424,12 @@ class PlayerManager:
             padded = encoded.ljust(attr.string_length, b"\x00")
             return self.mem.write_bytes(address, padded)
         return False
+
+    def write_attribute(self, player: Player, attr: AttributeDef, value: Any) -> bool:
+        resolved_attr = attr
+        if self._is_overall_attr(attr):
+            resolved_attr = self._resolve_live_overall_attr(self._get_table_base_for_player(player)) or attr
+        return self._write_attribute_direct(player, resolved_attr, value)
 
     def read_all_attributes(self, player: Player) -> Dict[str, Any]:
         result: Dict[str, Any] = {}
