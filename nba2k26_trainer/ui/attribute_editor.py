@@ -10,7 +10,7 @@ from PyQt5.QtGui import QFont
 
 from ..core.offsets import OffsetConfig, AttributeDef
 from ..models.player import Player, PlayerManager
-from typing import Dict, Optional, Any, List
+from typing import Callable, Dict, Optional, Any, List
 
 
 class AttributeRow(QWidget):
@@ -30,6 +30,11 @@ class AttributeRow(QWidget):
         layout.setSpacing(8)
 
         self._is_float = self.attr.type == "float"
+        numeric_range = self.attr.max_val - self.attr.min_val
+        self._show_slider = (
+            self.attr.type not in ("wstring", "ascii", "float")
+            and numeric_range <= 1000
+        )
 
         # 属性名
         self.name_label = QLabel(self.attr.name)
@@ -38,7 +43,7 @@ class AttributeRow(QWidget):
         layout.addWidget(self.name_label)
 
         # 滑块 (仅数值型, 非 float)
-        if self.attr.type not in ("wstring", "ascii", "float"):
+        if self._show_slider:
             self.slider = QSlider(Qt.Horizontal)
             self.slider.setMinimum(self.attr.min_val)
             self.slider.setMaximum(self.attr.max_val)
@@ -59,6 +64,13 @@ class AttributeRow(QWidget):
             self.spin = QSpinBox()
             self.spin.setMinimum(self.attr.min_val)
             self.spin.setMaximum(self.attr.max_val)
+            self.spin.setAccelerated(True)
+            if self.attr.max_val >= 10000000:
+                self.spin.setSingleStep(1000000)
+            elif self.attr.max_val >= 1000000:
+                self.spin.setSingleStep(100000)
+            elif self.attr.max_val >= 10000:
+                self.spin.setSingleStep(1000)
         self.spin.setFixedWidth(100)
         self.spin.valueChanged.connect(self._on_spin_changed)
         layout.addWidget(self.spin)
@@ -133,8 +145,9 @@ class AttributeEditorWidget(QWidget):
         self.player_mgr = player_mgr
         self.current_player: Optional[Player] = None
         self._attr_rows: Dict[str, AttributeRow] = {}
+        self._perfect_shot_team_resolver: Optional[Callable[[], Optional[Dict[str, Any]]]] = None
         self._perfect_shot_timer = QTimer(self)
-        self._perfect_shot_timer.setInterval(50)
+        self._perfect_shot_timer.setInterval(10)
         self._perfect_shot_timer.timeout.connect(self._on_perfect_shot_tick)
         self._setup_ui()
 
@@ -199,8 +212,10 @@ class AttributeEditorWidget(QWidget):
         self.btn_perfect_shot.setObjectName("btn_max")
         self.btn_perfect_shot.setCheckable(True)
         self.btn_perfect_shot.setToolTip(
-            "Targets the selected player's team during an active game.\n"
-            "It zeroes the live AI timing error buffer for your team and keeps team God Mode refreshed.\n"
+            "Targets the current MyGM team during an active game.\n"
+            "It prefers the current team filter, then falls back to the selected player.\n"
+            "It zeroes the live AI timing error buffer and boosts only the in-match copies for your team.\n"
+            "It does not modify the roster table or permanent player attributes.\n"
             "Beta: this is safer than the old global lock, but it is still experimental."
         )
         self.btn_perfect_shot.clicked.connect(self._toggle_perfect_shot_beta)
@@ -366,6 +381,25 @@ class AttributeEditorWidget(QWidget):
         self.btn_perfect_shot.setText("Stop Lock Green Beta" if active else "Lock Green Beta")
         self.btn_perfect_shot.blockSignals(False)
 
+    def set_perfect_shot_team_resolver(self, resolver: Optional[Callable[[], Optional[Dict[str, Any]]]]) -> None:
+        self._perfect_shot_team_resolver = resolver
+
+    def _resolve_perfect_shot_target(self) -> Optional[Dict[str, Any]]:
+        if self._perfect_shot_team_resolver is not None:
+            resolved = self._perfect_shot_team_resolver()
+            if resolved:
+                return resolved
+
+        if self.current_player is None:
+            return None
+
+        return {
+            "player": self.current_player,
+            "team_id": self.current_player.team_id,
+            "team_name": self.current_player.team_name,
+            "source": "selected player",
+        }
+
     def _toggle_perfect_shot_beta(self, checked: bool) -> None:
         if self.player_mgr is None:
             self._set_perfect_shot_button_state(False)
@@ -378,12 +412,17 @@ class AttributeEditorWidget(QWidget):
             self._set_perfect_shot_button_state(False)
             return
 
-        if self.current_player is None:
+        target = self._resolve_perfect_shot_target()
+        if target is None:
             self._set_perfect_shot_button_state(False)
-            QMessageBox.warning(self, "Lock Green Beta", "Select a player from your team first.")
+            QMessageBox.warning(self, "Lock Green Beta", "Select a player or filter your MyGM team first.")
             return
 
-        summary = self.player_mgr.start_perfect_shot_beta(self.current_player)
+        summary = self.player_mgr.start_perfect_shot_beta_for_team(
+            team_id=target.get("team_id"),
+            team_name=target.get("team_name"),
+            preferred_player=target.get("player"),
+        )
         if not summary.get("active"):
             self._set_perfect_shot_button_state(False)
             QMessageBox.warning(
@@ -395,16 +434,26 @@ class AttributeEditorWidget(QWidget):
 
         self._perfect_shot_timer.start()
         self._set_perfect_shot_button_state(True)
+        target_source = str(target.get("source") or "auto")
 
         lines = [
-            "Lock Green Beta is now running for your selected team.",
+            "Lock Green Beta is now running for your MyGM team.",
             f"Team: {summary.get('target_team_name') or 'n/a'}",
+            f"Target source: {target_source}",
+            f"Representative player: {summary.get('representative_player') or 'n/a'}",
             f"Runtime entry: {summary.get('entry_base') or 'n/a'}",
             f"Runtime team block: {summary.get('team_block_index') if summary.get('team_block_index') is not None else 'unresolved'}",
             f"AI timing delta zeroed: {'yes' if summary.get('ai_delta_written') else 'no'}",
+            "Runtime patches:"
+            f" AI-team={'yes' if summary.get('ai_team_delta_written') else 'no'}"
+            f" Human-team={'yes' if summary.get('human_team_delta_written') else 'no'}"
+            f" Coverage={'yes' if summary.get('coverage_delta_written') else 'no'}"
+            f" Impact={'yes' if summary.get('impact_delta_written') else 'no'}",
             f"Legacy global lock cleared: {'yes' if summary.get('legacy_cleared') else 'no'}",
-            f"Team players boosted: {summary.get('boosted_players', 0)}",
-            f"Attributes refreshed: {summary.get('boosted_attributes', 0)}",
+            f"Live match players boosted: {summary.get('match_boost_players', 0)}",
+            f"Live match entries boosted: {summary.get('match_boost_entries', 0)}",
+            f"Live match writes applied: {summary.get('match_boost_writes', 0)}",
+            "Player attributes are left unchanged by Lock Green.",
         ]
         QMessageBox.information(self, "Lock Green Beta Enabled", "\n".join(lines))
 

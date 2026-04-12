@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import struct
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ TEAM_PTR_OFFSET = 96
 TEAM_PTR_OFFSET_CANDIDATES = (96, 104, 184, 208, 216)
 MAX_VALID_POINTER = 0x7FFFFFFFFFFF
 PLAYER_TABLE_SAMPLE_SIZE = 24
+PLAYER_TABLE_POPULATION_SAMPLE_SIZE = 24
 TEAM_PTR_SAMPLE_SIZE = 120
 ROSTER_HINT_SAMPLE_SIZE = 160
 TEAM_TABLE_SAMPLE_SIZE = 40
@@ -31,6 +33,9 @@ DETAILED_MODULE_REF_CANDIDATE_LIMIT = 8
 LIVE_OVERALL_SAMPLE_SIZE = 160
 LIVE_OVERALL_TARGET_MEAN = 76.0
 LIVE_OVERALL_TARGET_STDDEV = 7.0
+MIN_ACCEPTABLE_PLAYER_COUNT = 450
+MAX_ACCEPTABLE_DUPLICATE_NAME_INSTANCES = 12
+MAX_ACCEPTABLE_NAME_REPEAT = 3
 FREE_AGENT_TEAM_ID = -2
 UNKNOWN_TEAM_ID = -3
 PACKED_RATING_OFFSET_MIN = 993
@@ -154,6 +159,9 @@ MODERN_FULL_NAMES = {
     ("Jordan", "Goodwin"),
 }
 
+CONTRACT_YEARS_LEFT_DESCRIPTION = "Contract Years Left"
+CONTRACT_SALARY_DESCRIPTIONS = tuple(f"Year {index} Salary" for index in range(1, 7))
+
 LIVE_OVERALL_ATTR_CANDIDATES = (
     AttributeDef(
         name="Live Overall Rating (bit418)",
@@ -256,6 +264,32 @@ GOD_MODE_PROFILE_VALUES: Dict[str, int | str] = {
     "Play Discipline": "max",
 }
 
+PERFECT_SHOT_MATCH_PROFILE_VALUES: Dict[str, int] = {
+    "Driving Layup": 99,
+    "Float Game": 4,
+    "Layup Mix Master": 4,
+    "Paint Prodigy": 4,
+    "Physical Finisher": 4,
+    "Posterizer": 4,
+    "Rise Up": 4,
+    "Off Screen 3pt": 99,
+    "Contested 3pt": 99,
+    "Contested Mid": 99,
+    "Stepback 3pt": 99,
+    "Drive Pull Up 3pt": 99,
+    "Drive Pull Up Mid": 99,
+    "Transition Pull Up 3pt": 99,
+    "Drive": 99,
+    "Spot Up Drive": 99,
+    "Attack Strong": 99,
+    "Contest Shot": 99,
+    "Deadeye": 4,
+    "Limitless Range": 4,
+    "Mini Marksman": 4,
+    "Shifty Shooter": 4,
+}
+PERFECT_SHOT_MATCH_REFRESH_INTERVAL = 25
+
 PERFECT_SHOT_MANAGER_SLOT_OFFSET = 0x789A170
 PERFECT_SHOT_ENTRY_COUNT_OFFSET = 0x17F8
 PERFECT_SHOT_ENTRY_ARRAY_OFFSET = 0x1800
@@ -266,14 +300,28 @@ PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET = 0x364
 PERFECT_SHOT_FORCED_ENABLE_VALUE = 1
 PERFECT_SHOT_FORCED_LOCK_VALUE = 0x7FFFFFFF
 PERFECT_SHOT_MAX_ENTRY_COUNT = 8
+PERFECT_SHOT_LEGACY_STATE_PATCHES: Tuple[Tuple[int, bytes], ...] = (
+    (0x452, b"\x01\x01"),
+    (0xBF2, b"\x01\x01"),
+)
 SHOT_RUNTIME_GLOBAL_PTR_SLOT = 0x14683DE68
 SHOT_RUNTIME_CONTAINER_OFFSET = 0xA8
 SHOT_RUNTIME_ENTRY_COUNT_OFFSET = 0x4B0
 SHOT_RUNTIME_ENTRY_BASE_OFFSET = 0x4B8
 SHOT_RUNTIME_ENTRY_STRIDE = 0xC1B8
 SHOT_RUNTIME_MAX_ENTRY_COUNT = 4
+SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET = 0x1570
 SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET = 0x1590
-SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE = 0x20
+SHOT_RUNTIME_COVERAGE_DELTA_OFFSET = 0x15B0
+SHOT_RUNTIME_IMPACT_DELTA_OFFSET = 0x23C0
+SHOT_RUNTIME_TIMING_DELTA_SIZE = 0x20
+SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE = SHOT_RUNTIME_TIMING_DELTA_SIZE
+SHOT_RUNTIME_PERFECT_PATCHES: Tuple[Tuple[str, int, bytes], ...] = (
+    ("ai_team_delta", SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
+    ("human_team_delta", SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
+    ("coverage_delta", SHOT_RUNTIME_COVERAGE_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
+    ("impact_delta", SHOT_RUNTIME_IMPACT_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
+)
 SHOT_RUNTIME_TEAM_BLOCK_OFFSET = 0x110
 SHOT_RUNTIME_TEAM_BLOCK_SIZE = 0x7A0
 SHOT_RUNTIME_TEAM_LINK_MAX_OBJECTS = 220
@@ -296,9 +344,6 @@ SHOT_RUNTIME_TEAM_LINK_START_RELS: Tuple[int, ...] = (
     0x88,
     0x98,
 )
-PERFECT_SHOT_REFRESH_TEAM_INTERVAL = 40
-
-
 @dataclass
 class Player:
     index: int
@@ -324,6 +369,10 @@ class TableMetrics:
     valid_overall: int = 0
     valid_birth_year: int = 0
     valid_team_refs: int = 0
+    estimated_player_count: int = 0
+    duplicate_name_instances: int = 0
+    duplicate_name_count: int = 0
+    max_name_repeat: int = 0
     score: int = 0
     team_ptr_offset: int = TEAM_PTR_OFFSET
     team_ptr_quality: int = 0
@@ -435,8 +484,10 @@ class PlayerManager:
         self._module_ref_count_cache: Dict[int, int] = {}
         self._match_compact_region_cache: Dict[int, List[Tuple[int, int, int, int]]] = {}
         self._match_compact_entry_cache: Dict[int, List[int]] = {}
+        self._perfect_shot_match_attr_cache: Optional[List[Tuple[AttributeDef, int]]] = None
         self._perfect_shot_beta_state: Optional[Dict[str, Any]] = None
         self._shot_runtime_team_block_cache: Dict[Tuple[int, int], Optional[int]] = {}
+        self._rejected_table_bases: set[int] = set()
 
     def set_roster_mode(self, mode: str) -> None:
         mode = (mode or "auto").strip().lower()
@@ -465,10 +516,12 @@ class PlayerManager:
             self._match_compact_region_cache.clear()
             self._match_compact_entry_cache.clear()
             self._shot_runtime_team_block_cache.clear()
+            self._rejected_table_bases.clear()
 
     def _discard_table_base(self, table_base: Optional[int]) -> None:
         if table_base is None:
             return
+        self._rejected_table_bases.add(table_base)
         self._team_ptr_offset_cache.pop(table_base, None)
         self._live_team_ptr_offset_cache.pop(table_base, None)
         self._live_overall_attr_cache.pop(table_base, None)
@@ -478,6 +531,8 @@ class PlayerManager:
         self._shot_runtime_team_block_cache.clear()
 
     def _is_cached_table_base_valid(self, table_base: int) -> bool:
+        if table_base in self._rejected_table_bases:
+            return False
         pt = self.config.player_table
         valid_names = 0
 
@@ -597,8 +652,21 @@ class PlayerManager:
             self._birth_year_attr = self._find_attribute(("出生年份",), "Birth Year")
         return self._birth_year_attr
 
+    def _get_contract_years_left_attr(self) -> Optional[AttributeDef]:
+        return self.config.find_attribute_by_description(CONTRACT_YEARS_LEFT_DESCRIPTION)
+
     def _is_overall_attr(self, attr: Optional[AttributeDef]) -> bool:
         return bool(attr) and attr.description.strip().lower() == "overall rating"
+
+    def _is_contract_salary_attr(self, attr: Optional[AttributeDef]) -> bool:
+        if not attr:
+            return False
+        return (attr.description or "").strip() in CONTRACT_SALARY_DESCRIPTIONS
+
+    def _is_contract_years_left_attr(self, attr: Optional[AttributeDef]) -> bool:
+        if not attr:
+            return False
+        return (attr.description or "").strip() == CONTRACT_YEARS_LEFT_DESCRIPTION
 
     def _get_table_base_for_player(self, player: Player) -> Optional[int]:
         if self._table_base is not None:
@@ -707,6 +775,20 @@ class PlayerManager:
             return None
         player = Player(index=-1, record_address=record_address)
         return self._read_attribute_direct(player, attr)
+
+    def _summarize_duplicate_player_names(self, players: List[Player]) -> Tuple[int, int, int]:
+        counts: Counter[str] = Counter()
+        for player in players:
+            first_name = _normalize_text(player.first_name)
+            last_name = _normalize_text(player.last_name)
+            if not _is_valid_name(first_name) or not _is_valid_name(last_name):
+                continue
+            counts[f"{first_name} {last_name}"] += 1
+
+        duplicate_instances = sum(count - 1 for count in counts.values() if count > 1)
+        duplicate_names = sum(1 for count in counts.values() if count > 1)
+        max_repeat = max(counts.values(), default=0)
+        return duplicate_instances, duplicate_names, max_repeat
 
     def _is_live_packed_rating_attr(self, attr: AttributeDef) -> bool:
         return (
@@ -845,6 +927,141 @@ class PlayerManager:
         scale = float(value) / 100.0
         return self.mem.write_float(body_base + scale_offset, scale)
 
+    def _read_blob_slice(self, blob: Optional[bytes], offset: int, size: int) -> Optional[bytes]:
+        if not blob or offset < 0 or size < 0:
+            return None
+        end = offset + size
+        if end > len(blob):
+            return None
+        return blob[offset:end]
+
+    def _read_wstring_from_blob(self, blob: Optional[bytes], offset: int, max_len: int) -> Optional[str]:
+        data = self._read_blob_slice(blob, offset, max_len * 2)
+        if not data:
+            return None
+        for index in range(0, len(data) - 1, 2):
+            if data[index] == 0 and data[index + 1] == 0:
+                data = data[:index]
+                break
+        return data.decode("utf-16-le", errors="replace")
+
+    def _read_ascii_from_blob(self, blob: Optional[bytes], offset: int, max_len: int) -> Optional[str]:
+        data = self._read_blob_slice(blob, offset, max_len)
+        if not data:
+            return None
+        try:
+            data = data[: data.index(0)]
+        except ValueError:
+            pass
+        return data.decode("ascii", errors="replace")
+
+    def _read_bitfield_from_blob(
+        self,
+        blob: Optional[bytes],
+        offset: int,
+        bit_start: int,
+        bit_length: int,
+    ) -> Optional[int]:
+        byte_offset = bit_start // 8
+        total_bits = bit_start % 8 + bit_length
+        total_bytes = (total_bits + 7) // 8
+        data = self._read_blob_slice(blob, offset + byte_offset, total_bytes)
+        if not data:
+            return None
+        value = int.from_bytes(data, byteorder="little")
+        shift = bit_start % 8
+        mask = (1 << bit_length) - 1
+        return (value >> shift) & mask
+
+    def _read_attribute_value_from_blob(self, blob: Optional[bytes], attr: AttributeDef) -> Optional[Any]:
+        if blob is None:
+            return None
+
+        if self._is_live_packed_rating_attr(attr):
+            value = self._read_bitfield_from_blob(blob, attr.offset, 1, 7)
+            if value is None:
+                return None
+            return min(self._effective_attr_max(attr), value)
+
+        attr_type = attr.type
+        if attr_type == "uint8":
+            data = self._read_blob_slice(blob, attr.offset, 1)
+            return data[0] if data else None
+        if attr_type == "int8":
+            data = self._read_blob_slice(blob, attr.offset, 1)
+            return int.from_bytes(data, byteorder="little", signed=True) if data else None
+        if attr_type == "uint16":
+            data = self._read_blob_slice(blob, attr.offset, 2)
+            return int.from_bytes(data, byteorder="little") if data else None
+        if attr_type == "int16":
+            data = self._read_blob_slice(blob, attr.offset, 2)
+            return int.from_bytes(data, byteorder="little", signed=True) if data else None
+        if attr_type == "uint32":
+            data = self._read_blob_slice(blob, attr.offset, 4)
+            return int.from_bytes(data, byteorder="little") if data else None
+        if attr_type == "int32":
+            data = self._read_blob_slice(blob, attr.offset, 4)
+            return int.from_bytes(data, byteorder="little", signed=True) if data else None
+        if attr_type == "uint64":
+            data = self._read_blob_slice(blob, attr.offset, 8)
+            return int.from_bytes(data, byteorder="little") if data else None
+        if attr_type == "float":
+            data = self._read_blob_slice(blob, attr.offset, 4)
+            return struct.unpack("<f", data)[0] if data and len(data) == 4 else None
+        if attr_type == "bitfield":
+            value = self._read_bitfield_from_blob(blob, attr.offset, attr.bit_start, attr.bit_length)
+            if value is None:
+                return None
+            if self._is_live_badge_attr(attr):
+                return min(LIVE_BADGE_MAX_TIER, value)
+            return value
+        if attr_type == "wstring":
+            return self._read_wstring_from_blob(blob, attr.offset, attr.string_length)
+        if attr_type == "ascii":
+            return self._read_ascii_from_blob(blob, attr.offset, attr.string_length)
+        return None
+
+    def _read_body_attr_from_blobs(
+        self,
+        player: Player,
+        attr: AttributeDef,
+        record_blob: Optional[bytes],
+        body_blob: Optional[bytes],
+    ) -> Optional[Any]:
+        description = attr.description
+        if description == "Weight (kg)":
+            data = self._read_blob_slice(record_blob, attr.offset, 4)
+            if not data or len(data) != 4:
+                return None
+            pounds = struct.unpack("<f", data)[0]
+            return round(float(pounds) / POUNDS_PER_KG, 2)
+
+        if body_blob is None:
+            return None
+
+        if description == "Height in cm":
+            data = self._read_blob_slice(body_blob, BODY_HEIGHT_INCHES_OFFSET, 1)
+            return int(round(float(data[0]) * 2.54)) if data else None
+
+        if description == "Wingspan in cm":
+            data = self._read_blob_slice(body_blob, BODY_WINGSPAN_INCHES_OFFSET, 1)
+            return int(round(float(data[0]) * 2.54)) if data else None
+
+        scale_offsets = {
+            "Trunk Length": BODY_TRUNK_SCALE_OFFSET,
+            "Shoulder Width": BODY_SHOULDER_SCALE_OFFSET,
+            "Arm Scale": BODY_ARM_SCALE_OFFSET,
+            "Neck Length": BODY_NECK_SCALE_OFFSET,
+        }
+        scale_offset = scale_offsets.get(description)
+        if scale_offset is None:
+            return None
+
+        data = self._read_blob_slice(body_blob, scale_offset, 4)
+        if not data or len(data) != 4:
+            return None
+        return round(struct.unpack("<f", data)[0] * 100.0, 2)
+
     def _append_pointer_candidates(
         self, candidates: List[Tuple[int, str]], raw_value: Optional[int], source: str
     ) -> None:
@@ -883,6 +1100,8 @@ class PlayerManager:
         for base, source in candidates:
             if base in seen:
                 continue
+            if base in self._rejected_table_bases:
+                continue
             seen.add(base)
             unique_candidates.append((base, source))
         return unique_candidates
@@ -904,6 +1123,19 @@ class PlayerManager:
                 continue
 
             full_name = (first_name, last_name)
+            if full_name in LEGEND_FULL_NAMES:
+                legend_hits += 1
+            if full_name in MODERN_FULL_NAMES:
+                modern_hits += 1
+
+        return legend_hits, modern_hits
+
+    def _count_roster_player_hits(self, players: List[Player]) -> Tuple[int, int]:
+        legend_hits = 0
+        modern_hits = 0
+
+        for player in players[:ROSTER_HINT_SAMPLE_SIZE]:
+            full_name = (_normalize_text(player.first_name), _normalize_text(player.last_name))
             if full_name in LEGEND_FULL_NAMES:
                 legend_hits += 1
             if full_name in MODERN_FULL_NAMES:
@@ -1158,6 +1390,26 @@ class PlayerManager:
         )
         metrics.legend_hits, metrics.modern_hits = self._count_roster_name_hits(table_base)
 
+        sparse_valid = 0
+        sparse_total = 0
+        sparse_step = max(1, pt.max_players // max(1, PLAYER_TABLE_POPULATION_SAMPLE_SIZE))
+        for index in range(0, pt.max_players, sparse_step):
+            record_address = table_base + index * pt.stride
+            last_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.last_name_offset, pt.name_string_length)
+            )
+            first_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.first_name_offset, pt.name_string_length)
+            )
+            if _is_valid_name(first_name) or _is_valid_name(last_name):
+                sparse_valid += 1
+            sparse_total += 1
+            if sparse_total >= PLAYER_TABLE_POPULATION_SAMPLE_SIZE:
+                break
+        if sparse_total > 0:
+            metrics.estimated_player_count = int(round(pt.max_players * (sparse_valid / sparse_total)))
+
+        sample_name_counts: Counter[str] = Counter()
         for index in range(min(PLAYER_TABLE_SAMPLE_SIZE, pt.max_players)):
             record_address = table_base + index * pt.stride
             last_name = _normalize_text(
@@ -1174,6 +1426,8 @@ class PlayerManager:
 
             if _is_valid_name(first_name) or _is_valid_name(last_name):
                 metrics.valid_names += 1
+                if _is_valid_name(first_name) and _is_valid_name(last_name):
+                    sample_name_counts[f"{first_name} {last_name}"] += 1
 
             overall = self._read_value_at(record_address, overall_attr)
             if isinstance(overall, int) and 25 <= overall <= 99:
@@ -1191,6 +1445,14 @@ class PlayerManager:
                 if team_name:
                     metrics.valid_team_refs += 1
 
+        metrics.duplicate_name_instances = sum(
+            count - 1 for count in sample_name_counts.values() if count > 1
+        )
+        metrics.duplicate_name_count = sum(
+            1 for count in sample_name_counts.values() if count > 1
+        )
+        metrics.max_name_repeat = max(sample_name_counts.values(), default=0)
+
         metrics.score = (
             metrics.valid_names * 5
             + metrics.valid_overall * 4
@@ -1203,7 +1465,13 @@ class PlayerManager:
             metrics.score
             + min(80, metrics.team_ptr_quality // 16)
             + min(180, metrics.module_ref_count * 3)
+            + min(160, metrics.estimated_player_count // 4)
         )
+        if metrics.estimated_player_count < MIN_ACCEPTABLE_PLAYER_COUNT:
+            metrics.selection_score -= (MIN_ACCEPTABLE_PLAYER_COUNT - metrics.estimated_player_count)
+        if metrics.legend_hits >= 2 and metrics.modern_hits >= 2:
+            metrics.selection_score -= metrics.duplicate_name_instances * 40
+            metrics.selection_score -= max(0, metrics.max_name_repeat - 1) * 30
         return metrics
 
     def _is_promising_player_table(self, metrics: TableMetrics) -> bool:
@@ -1222,11 +1490,17 @@ class PlayerManager:
             metrics.valid_birth_year >= required_birth_year
             or metrics.valid_team_refs >= required_team_refs
         )
+        duplicate_heavy_sample = (
+            metrics.duplicate_name_instances >= 4
+            or metrics.max_name_repeat >= 3
+        )
+        mixed_era_duplicate_sample = duplicate_heavy_sample and metrics.legend_hits >= 2 and metrics.modern_hits >= 2
 
         return (
             metrics.valid_names >= required_names
             and has_structural_signal
             and metrics.score >= 18
+            and not mixed_era_duplicate_sample
         )
 
     def _matches_requested_roster_mode(self, metrics: TableMetrics) -> bool:
@@ -1398,12 +1672,53 @@ class PlayerManager:
             return base
         return None
 
-    def _resolve_table_base(self, progress_callback=None) -> Optional[int]:
-        if self._table_base is not None:
-            if self._is_cached_table_base_valid(self._table_base):
+    def _build_roster_signature(self, table_base: int) -> Tuple[int, int, Tuple[str, ...]]:
+        pt = self.config.player_table
+        overall_attr = self._resolve_live_overall_attr(table_base)
+        team_table_base = self._resolve_team_table_base()
+        team_ptr_offset, _ = self._resolve_live_team_ptr_offset(table_base, team_table_base)
+
+        sample_slots = 12
+        step = max(1, pt.max_players // sample_slots)
+        sample_indices: List[int] = []
+        for index in range(0, pt.max_players, step):
+            sample_indices.append(index)
+            if len(sample_indices) >= sample_slots:
+                break
+        tail_index = max(0, pt.max_players - 1)
+        if tail_index not in sample_indices:
+            sample_indices.append(tail_index)
+
+        signature_parts: List[str] = []
+        for index in sample_indices:
+            record_address = table_base + index * pt.stride
+            first_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.first_name_offset, pt.name_string_length)
+            )
+            last_name = _normalize_text(
+                self.mem.read_wstring(record_address + pt.last_name_offset, pt.name_string_length)
+            )
+            overall = self._read_value_at(record_address, overall_attr)
+            team_ptr = int(self.mem.read_uint64(record_address + team_ptr_offset) or 0)
+            signature_parts.append(
+                f"{index}:{first_name}|{last_name}|{overall if isinstance(overall, int) else -1}|{team_ptr & 0xFFFFFFFF:X}"
+            )
+
+        return (table_base, team_ptr_offset, tuple(signature_parts))
+
+    def get_live_roster_signature(self, *, force_refresh: bool = False) -> Optional[Tuple[int, int, Tuple[str, ...]]]:
+        table_base = self._resolve_table_base(use_cached=not force_refresh)
+        if table_base is None:
+            return None
+        return self._build_roster_signature(table_base)
+
+    def _resolve_table_base(self, progress_callback=None, *, use_cached: bool = True) -> Optional[int]:
+        cached_base = self._table_base
+        if use_cached and cached_base is not None:
+            if self._is_cached_table_base_valid(cached_base):
                 if progress_callback:
-                    progress_callback(f"Using cached player table: 0x{self._table_base:X}")
-                return self._table_base
+                    progress_callback(f"Using cached player table: 0x{cached_base:X}")
+                return cached_base
             self._table_base = None
 
         pt = self.config.player_table
@@ -1423,6 +1738,7 @@ class PlayerManager:
             weak_config_snapshot = (
                 self.roster_mode in {"auto", "current"}
                 and best_metrics.module_ref_count < CACHED_TABLE_MIN_MODULE_REFS
+                and best_metrics.estimated_player_count < MIN_ACCEPTABLE_PLAYER_COUNT
             )
             if self._matches_requested_roster_mode(best_metrics) and not weak_config_snapshot:
                 self._table_base = best_base
@@ -1476,6 +1792,9 @@ class PlayerManager:
             if fallback_config_base is not None:
                 self._table_base = fallback_config_base
                 return fallback_config_base
+            if cached_base is not None and self._is_cached_table_base_valid(cached_base):
+                self._table_base = cached_base
+                return cached_base
             return None
 
         new_rva = scan_for_base_pointer(self.mem, best_base, self.mem.base_address)
@@ -1625,14 +1944,25 @@ class PlayerManager:
         next_dynamic_team_id = 1000
         overall_attr = self._resolve_live_overall_attr(table_base)
         birth_year_attr = self._get_birth_year_attr()
+        table_blob = self.mem.read_bytes(table_base, player_table.max_players * player_table.stride)
 
         for index in range(player_table.max_players):
             record_address = table_base + index * player_table.stride
+            record_blob = None
+            if table_blob:
+                start = index * player_table.stride
+                end = start + player_table.stride
+                if end <= len(table_blob):
+                    record_blob = table_blob[start:end]
             last_name = _normalize_text(
-                self.mem.read_wstring(record_address + player_table.last_name_offset, player_table.name_string_length)
+                self._read_wstring_from_blob(record_blob, player_table.last_name_offset, player_table.name_string_length)
+                if record_blob is not None
+                else self.mem.read_wstring(record_address + player_table.last_name_offset, player_table.name_string_length)
             )
             first_name = _normalize_text(
-                self.mem.read_wstring(record_address + player_table.first_name_offset, player_table.name_string_length)
+                self._read_wstring_from_blob(record_blob, player_table.first_name_offset, player_table.name_string_length)
+                if record_blob is not None
+                else self.mem.read_wstring(record_address + player_table.first_name_offset, player_table.name_string_length)
             )
 
             if not first_name and not last_name:
@@ -1647,7 +1977,12 @@ class PlayerManager:
                 last_name=last_name,
             )
 
-            team_ptr = self.mem.read_uint64(record_address + team_ptr_offset)
+            team_ptr_bytes = self._read_blob_slice(record_blob, team_ptr_offset, 8) if record_blob is not None else None
+            team_ptr = (
+                int.from_bytes(team_ptr_bytes, byteorder="little")
+                if team_ptr_bytes and len(team_ptr_bytes) == 8
+                else self.mem.read_uint64(record_address + team_ptr_offset)
+            )
             (player.team_name, player.team_id), next_dynamic_team_id = self._resolve_team_info(
                 team_ptr,
                 team_table_base,
@@ -1655,11 +1990,19 @@ class PlayerManager:
                 next_dynamic_team_id,
             )
 
-            overall = self._read_value_at(record_address, overall_attr)
+            overall = (
+                self._read_attribute_value_from_blob(record_blob, overall_attr)
+                if record_blob is not None and overall_attr is not None
+                else self._read_value_at(record_address, overall_attr)
+            )
             if isinstance(overall, int) and 0 <= overall <= 99:
                 player.overall = overall
 
-            birth_year = self._read_value_at(record_address, birth_year_attr)
+            birth_year = (
+                self._read_attribute_value_from_blob(record_blob, birth_year_attr)
+                if record_blob is not None and birth_year_attr is not None
+                else self._read_value_at(record_address, birth_year_attr)
+            )
             if isinstance(birth_year, int) and 1950 <= birth_year <= datetime.datetime.now().year:
                 player.birth_year = birth_year
                 player.age = birth_year_to_age(birth_year)
@@ -1677,15 +2020,38 @@ class PlayerManager:
 
             team_table_base = self._resolve_team_table_base(progress_callback)
             players = self._collect_players_from_table(self._table_base, team_table_base)
-            if players or attempt == 1:
+            duplicate_instances, duplicate_names, max_repeat = self._summarize_duplicate_player_names(players)
+            legend_hits, modern_hits = self._count_roster_player_hits(players)
+            duplicate_snapshot = (
+                (
+                    duplicate_instances >= MAX_ACCEPTABLE_DUPLICATE_NAME_INSTANCES
+                    or max_repeat > MAX_ACCEPTABLE_NAME_REPEAT
+                )
+                and legend_hits >= 2
+                and modern_hits >= 2
+            )
+
+            if len(players) >= MIN_ACCEPTABLE_PLAYER_COUNT and not duplicate_snapshot:
                 self.players = players
                 return players
 
+            if duplicate_snapshot and attempt == 1:
+                self.players = []
+                return []
+
             bad_base = self._table_base
             if progress_callback:
-                progress_callback(
-                    f"Selected player table 0x{bad_base:X} produced no valid players. Retrying with a fresh scan..."
-                )
+                if duplicate_snapshot:
+                    progress_callback(
+                        f"Selected player table 0x{bad_base:X} looks like a duplicate-heavy snapshot "
+                        f"({duplicate_names} repeated names, max repeat {max_repeat}). "
+                        "Retrying with a fresh scan..."
+                    )
+                else:
+                    progress_callback(
+                        f"Selected player table 0x{bad_base:X} produced only {len(players)} players. "
+                        "Retrying with a fresh scan..."
+                    )
             self._discard_table_base(bad_base)
             self._table_base = None
 
@@ -1841,6 +2207,126 @@ class PlayerManager:
 
         return writes
 
+    def _get_perfect_shot_match_attrs(self) -> List[Tuple[AttributeDef, int]]:
+        if self._perfect_shot_match_attr_cache is not None:
+            return self._perfect_shot_match_attr_cache
+
+        attrs: List[Tuple[AttributeDef, int]] = []
+        for description, target_value in PERFECT_SHOT_MATCH_PROFILE_VALUES.items():
+            attr = self.config.find_attribute_by_description(description)
+            if attr is None:
+                continue
+            if self._map_match_compact_offset(attr.offset) is None:
+                continue
+            attrs.append((attr, self._coerce_attribute_value(attr, target_value)))
+
+        self._perfect_shot_match_attr_cache = attrs
+        return attrs
+
+    def _iter_team_players(self, team_id: int, team_name: Optional[str]) -> List[Player]:
+        if not self.players:
+            self.scan_players()
+
+        normalized_team_name = _normalize_text(team_name).lower()
+        team_players: List[Player] = []
+        for candidate in self.players:
+            same_team_id = candidate.team_id == team_id
+            same_team_name = bool(normalized_team_name) and _normalize_text(candidate.team_name).lower() == normalized_team_name
+            if same_team_id or same_team_name:
+                team_players.append(candidate)
+        return team_players
+
+    def _clear_match_compact_cache_for_team(self, team_id: int, team_name: Optional[str]) -> None:
+        for candidate in self._iter_team_players(team_id, team_name):
+            self._match_compact_entry_cache.pop(candidate.record_address, None)
+
+    def _apply_perfect_shot_match_boosts(
+        self,
+        team_id: int,
+        team_name: Optional[str],
+        originals: Dict[Tuple[int, str], Any],
+    ) -> Dict[str, int]:
+        attrs = self._get_perfect_shot_match_attrs()
+        if not attrs:
+            return {
+                "match_boost_players": 0,
+                "match_boost_entries": 0,
+                "match_boost_writes": 0,
+            }
+
+        boosted_players = 0
+        boosted_writes = 0
+        seen_entries: set[int] = set()
+
+        for player in self._iter_team_players(team_id, team_name):
+            entry_bases = self._get_match_compact_entry_bases(player)
+            if not entry_bases:
+                continue
+
+            boosted_players += 1
+            seen_entries.update(entry_bases)
+
+            for attr, target_value in attrs:
+                mapped_offset = self._map_match_compact_offset(attr.offset)
+                if mapped_offset is None:
+                    continue
+
+                for entry_base in entry_bases:
+                    key = (entry_base, attr.name)
+                    if key not in originals:
+                        originals[key] = self._read_attribute_value_at(entry_base + mapped_offset, attr)
+
+                boosted_writes += self._write_match_compact_attribute(player, attr, target_value)
+
+        return {
+            "match_boost_players": boosted_players,
+            "match_boost_entries": len(seen_entries),
+            "match_boost_writes": boosted_writes,
+        }
+
+    def _restore_perfect_shot_match_boosts(self, originals: Dict[Tuple[int, str], Any]) -> int:
+        restored_writes = 0
+        for (entry_base, attr_name), original_value in originals.items():
+            if original_value is None:
+                continue
+            attr = self.config.get_attribute(attr_name)
+            if attr is None:
+                continue
+            mapped_offset = self._map_match_compact_offset(attr.offset)
+            if mapped_offset is None:
+                continue
+            if self._write_attribute_value_at(entry_base + mapped_offset, attr, original_value):
+                restored_writes += 1
+        return restored_writes
+
+    def _infer_contract_years_left(self, player: Player) -> int:
+        highest_nonzero_year = 0
+        for description in CONTRACT_SALARY_DESCRIPTIONS:
+            attr = self.config.find_attribute_by_description(description)
+            if attr is None:
+                continue
+            value = self._read_attribute_direct(player, attr)
+            if isinstance(value, int) and value > 0:
+                try:
+                    year_number = int(description.split()[1])
+                except (IndexError, ValueError):
+                    continue
+                highest_nonzero_year = max(highest_nonzero_year, year_number)
+        return highest_nonzero_year
+
+    def _sync_contract_years_left(self, player: Player) -> bool:
+        contract_years_attr = self._get_contract_years_left_attr()
+        if contract_years_attr is None:
+            return False
+
+        target_years = self._infer_contract_years_left(player)
+        target_years = max(contract_years_attr.min_val, min(contract_years_attr.max_val, target_years))
+        current_years = self._read_attribute_direct(player, contract_years_attr)
+        if current_years == target_years:
+            return True
+
+        return self._write_attribute_direct(player, contract_years_attr, target_years)
+
     def read_attribute(self, player: Player, attr: AttributeDef) -> Optional[Any]:
         resolved_attr = attr
         if self._is_overall_attr(attr):
@@ -1863,13 +2349,33 @@ class PlayerManager:
         resolved_attr = attr
         if self._is_overall_attr(attr):
             resolved_attr = self._resolve_live_overall_attr(self._get_table_base_for_player(player)) or attr
-        return self._write_attribute_direct(player, resolved_attr, value)
+        success = self._write_attribute_direct(player, resolved_attr, value)
+        if success and self._is_contract_salary_attr(resolved_attr):
+            self._sync_contract_years_left(player)
+        return success
 
     def read_all_attributes(self, player: Player) -> Dict[str, Any]:
+        record_blob = self.mem.read_bytes(player.record_address, self.config.player_table.stride)
+        body_blob = None
+        body_base = self._get_body_record_base(player)
+        if body_base is not None:
+            body_blob = self.mem.read_bytes(body_base, 0x20)
+        table_base = self._get_table_base_for_player(player)
         result: Dict[str, Any] = {}
         for attrs in self.config.attributes.values():
             for attr in attrs:
-                result[attr.name] = self.read_attribute(player, attr)
+                resolved_attr = attr
+                if self._is_overall_attr(attr):
+                    resolved_attr = self._resolve_live_overall_attr(table_base) or attr
+
+                if self._is_body_attr(resolved_attr):
+                    value = self._read_body_attr_from_blobs(player, resolved_attr, record_blob, body_blob)
+                else:
+                    value = self._read_attribute_value_from_blob(record_blob, resolved_attr)
+
+                if value is None:
+                    value = self.read_attribute(player, attr)
+                result[attr.name] = value
         return result
 
     def write_all_attributes(self, player: Player, values: Dict[str, Any]) -> Dict[str, bool]:
@@ -2034,6 +2540,67 @@ class PlayerManager:
         self._shot_runtime_team_block_cache[cache_key] = result
         return result
 
+    def _resolve_perfect_shot_team_target(
+        self,
+        entry_base: int,
+        preferred_player: Optional[Player] = None,
+        team_id: Optional[int] = None,
+        team_name: Optional[str] = None,
+    ) -> Optional[Tuple[Player, int, str, int]]:
+        candidates: List[Player] = []
+        normalized_team_name = _normalize_text(team_name).lower()
+
+        if preferred_player is not None:
+            candidates.append(preferred_player)
+            if team_id is None:
+                team_id = preferred_player.team_id
+            if not team_name:
+                team_name = preferred_player.team_name
+                normalized_team_name = _normalize_text(team_name).lower()
+
+        if team_id is not None or normalized_team_name:
+            seen_records = {candidate.record_address for candidate in candidates}
+            for candidate in self._iter_team_players(
+                team_id if team_id is not None else UNKNOWN_TEAM_ID,
+                team_name,
+            ):
+                if candidate.record_address in seen_records:
+                    continue
+                candidates.append(candidate)
+                seen_records.add(candidate.record_address)
+
+        if not candidates and self.players:
+            candidates.extend(self.players)
+
+        best: Optional[Tuple[Player, int, str, int, int]] = None
+        for candidate in candidates:
+            block_index = self._resolve_shot_runtime_team_block_index(entry_base, candidate)
+            if block_index is None:
+                continue
+
+            match_entry_count = len(self._get_match_compact_entry_bases(candidate))
+            score = match_entry_count * 100
+            if preferred_player is not None and candidate.record_address == preferred_player.record_address:
+                score += 10
+
+            if best is None or score > best[4]:
+                best = (
+                    candidate,
+                    candidate.team_id,
+                    candidate.team_name or team_name or "Unknown",
+                    block_index,
+                    score,
+                )
+
+                if preferred_player is not None and match_entry_count > 0:
+                    break
+
+        if best is None:
+            return None
+
+        player, resolved_team_id, resolved_team_name, block_index, _ = best
+        return player, resolved_team_id, resolved_team_name, block_index
+
     def _clear_legacy_perfect_shot_state(self) -> bool:
         cleared = False
         for entry_base in self._get_perfect_shot_beta_entry_bases():
@@ -2042,7 +2609,96 @@ class PlayerManager:
             cleared = self.mem.write_uint32(entry_base + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET, 0) or cleared
         return cleared
 
+    def _capture_runtime_perfect_shot_patches(self, entry_base: int) -> Dict[str, Dict[str, Any]]:
+        originals: Dict[str, Dict[str, Any]] = {}
+        for name, offset, patch_bytes in SHOT_RUNTIME_PERFECT_PATCHES:
+            address = entry_base + offset
+            original_bytes = self.mem.read_bytes(address, len(patch_bytes))
+            if not original_bytes or len(original_bytes) != len(patch_bytes):
+                continue
+            originals[name] = {
+                "address": address,
+                "original": original_bytes,
+                "patch": patch_bytes,
+            }
+        return originals
+
+    def _apply_runtime_perfect_shot_patches(
+        self,
+        originals: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        writes = 0
+        applied: Dict[str, bool] = {}
+        for name, patch_state in originals.items():
+            address = int(patch_state["address"])
+            patch_bytes = bytes(patch_state["patch"])
+            current_bytes = self.mem.read_bytes(address, len(patch_bytes)) or b""
+            if current_bytes != patch_bytes and self.mem.write_bytes(address, patch_bytes):
+                writes += 1
+                current_bytes = self.mem.read_bytes(address, len(patch_bytes)) or b""
+            applied[name] = current_bytes == patch_bytes
+        return {
+            "writes": writes,
+            "applied": applied,
+        }
+
+    def _restore_runtime_perfect_shot_patches(
+        self,
+        originals: Dict[str, Dict[str, Any]],
+    ) -> int:
+        writes = 0
+        for patch_state in originals.values():
+            if self.mem.write_bytes(int(patch_state["address"]), bytes(patch_state["original"])):
+                writes += 1
+        return writes
+
+    def _capture_legacy_perfect_shot_patches(self) -> Dict[Tuple[int, int], bytes]:
+        originals: Dict[Tuple[int, int], bytes] = {}
+        for entry_base in self._get_perfect_shot_beta_entry_bases():
+            for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
+                original_bytes = self.mem.read_bytes(entry_base + offset, len(patch_bytes))
+                if not original_bytes or len(original_bytes) != len(patch_bytes):
+                    continue
+                originals[(entry_base, offset)] = original_bytes
+        return originals
+
+    def _apply_legacy_perfect_shot_patches(self, originals: Dict[Tuple[int, int], bytes]) -> int:
+        writes = 0
+        for (entry_base, offset), original_bytes in originals.items():
+            patch_bytes = next(
+                (
+                    candidate
+                    for candidate_offset, candidate in PERFECT_SHOT_LEGACY_STATE_PATCHES
+                    if candidate_offset == offset
+                ),
+                None,
+            )
+            if patch_bytes is None or original_bytes == patch_bytes:
+                continue
+            if self.mem.write_bytes(entry_base + offset, patch_bytes):
+                writes += 1
+        return writes
+
+    def _restore_legacy_perfect_shot_patches(self, originals: Dict[Tuple[int, int], bytes]) -> int:
+        writes = 0
+        for (entry_base, offset), original_bytes in originals.items():
+            if self.mem.write_bytes(entry_base + offset, original_bytes):
+                writes += 1
+        return writes
+
     def start_perfect_shot_beta(self, player: Player) -> Dict[str, Any]:
+        return self.start_perfect_shot_beta_for_team(
+            team_id=player.team_id,
+            team_name=player.team_name,
+            preferred_player=player,
+        )
+
+    def start_perfect_shot_beta_for_team(
+        self,
+        team_id: Optional[int] = None,
+        team_name: Optional[str] = None,
+        preferred_player: Optional[Player] = None,
+    ) -> Dict[str, Any]:
         if self._perfect_shot_beta_state is not None:
             self.stop_perfect_shot_beta()
 
@@ -2054,40 +2710,75 @@ class PlayerManager:
             }
 
         entry_base = entry_bases[0]
-        ai_delta_address = entry_base + SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET
-        original_ai_delta = self.mem.read_bytes(ai_delta_address, SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
-        if not original_ai_delta or len(original_ai_delta) != SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE:
+        runtime_patch_originals = self._capture_runtime_perfect_shot_patches(entry_base)
+        if "human_team_delta" not in runtime_patch_originals:
             return {
                 "active": False,
-                "error": "Failed to read the live AI timing delta buffer.",
+                "error": "Failed to read the live shot timing buffers.",
             }
 
-        target_team_name = player.team_name or "Unknown"
-        team_summary = self.apply_god_mode_to_team(player.team_id, player.team_name)
-        zero_buffer = bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
-        ai_delta_written = bool(self.mem.write_bytes(ai_delta_address, zero_buffer))
+        target = self._resolve_perfect_shot_team_target(
+            entry_base,
+            preferred_player=preferred_player,
+            team_id=team_id,
+            team_name=team_name,
+        )
+        if target is None:
+            return {
+                "active": False,
+                "error": "Failed to resolve the live MyGM team block.",
+            }
+        target_player, resolved_team_id, target_team_name, team_block_index = target
+
+        runtime_patch_summary = self._apply_runtime_perfect_shot_patches(runtime_patch_originals)
+        runtime_applied = runtime_patch_summary.get("applied", {})
         legacy_cleared = self._clear_legacy_perfect_shot_state()
-        team_block_index = self._resolve_shot_runtime_team_block_index(entry_base, player)
+        legacy_state_originals = self._capture_legacy_perfect_shot_patches()
+        legacy_state_writes = self._apply_legacy_perfect_shot_patches(legacy_state_originals)
+        match_copy_originals: Dict[Tuple[int, str], Any] = {}
+        match_boost_summary = self._apply_perfect_shot_match_boosts(
+            resolved_team_id,
+            target_team_name,
+            match_copy_originals,
+        )
 
         self._perfect_shot_beta_state = {
             "entry_base": entry_base,
-            "ai_delta_address": ai_delta_address,
-            "original_ai_delta": original_ai_delta,
-            "zero_ai_delta": zero_buffer,
-            "team_id": player.team_id,
+            "runtime_patch_originals": runtime_patch_originals,
+            "runtime_patch_writes": int(runtime_patch_summary["writes"]),
+            "team_id": resolved_team_id,
             "team_name": target_team_name,
             "team_block_index": team_block_index,
+            "representative_player": target_player.full_name,
             "refresh_counter": 0,
+            "legacy_state_originals": legacy_state_originals,
+            "legacy_state_writes": legacy_state_writes,
+            "match_copy_originals": match_copy_originals,
+            "match_boost_players": match_boost_summary["match_boost_players"],
+            "match_boost_entries": match_boost_summary["match_boost_entries"],
+            "match_boost_writes": match_boost_summary["match_boost_writes"],
         }
+        self._perfect_shot_beta_state.update(runtime_applied)
 
         return {
             "active": True,
             "entry_base": hex(entry_base),
             "target_team_name": target_team_name,
             "team_block_index": team_block_index,
-            "ai_delta_written": ai_delta_written,
+            "ai_delta_written": bool(
+                runtime_applied.get("ai_team_delta") or runtime_applied.get("human_team_delta")
+            ),
+            "ai_team_delta_written": bool(runtime_applied.get("ai_team_delta")),
+            "human_team_delta_written": bool(runtime_applied.get("human_team_delta")),
+            "coverage_delta_written": bool(runtime_applied.get("coverage_delta")),
+            "impact_delta_written": bool(runtime_applied.get("impact_delta")),
+            "runtime_patch_writes": int(runtime_patch_summary["writes"]),
             "legacy_cleared": legacy_cleared,
-            **team_summary,
+            "legacy_state_writes": legacy_state_writes,
+            "representative_player": target_player.full_name,
+            "match_boost_players": match_boost_summary["match_boost_players"],
+            "match_boost_entries": match_boost_summary["match_boost_entries"],
+            "match_boost_writes": match_boost_summary["match_boost_writes"],
         }
 
     def refresh_perfect_shot_beta(self) -> Dict[str, Any]:
@@ -2095,25 +2786,52 @@ class PlayerManager:
         if not state:
             return {"active": False}
 
-        ai_delta_address = int(state["ai_delta_address"])
-        zero_buffer = state["zero_ai_delta"]
-        ai_delta_written = bool(self.mem.write_bytes(ai_delta_address, zero_buffer))
+        runtime_patch_summary = self._apply_runtime_perfect_shot_patches(
+            state.get("runtime_patch_originals", {})
+        )
+        runtime_applied = runtime_patch_summary.get("applied", {})
+        legacy_state_writes = self._apply_legacy_perfect_shot_patches(
+            state.get("legacy_state_originals", {})
+        )
+        state.update(runtime_applied)
+        state["runtime_patch_writes"] = int(runtime_patch_summary["writes"])
+        state["legacy_state_writes"] = legacy_state_writes
         state["refresh_counter"] = int(state.get("refresh_counter", 0)) + 1
+        match_boost_players = int(state.get("match_boost_players", 0))
+        match_boost_entries = int(state.get("match_boost_entries", 0))
+        match_boost_writes = 0
 
-        team_refresh_summary = {"boosted_players": 0, "boosted_attributes": 0}
-        if state["refresh_counter"] % PERFECT_SHOT_REFRESH_TEAM_INTERVAL == 0:
-            team_refresh_summary = self.apply_god_mode_to_team(
+        if state["refresh_counter"] % PERFECT_SHOT_MATCH_REFRESH_INTERVAL == 0:
+            self._clear_match_compact_cache_for_team(int(state["team_id"]), state["team_name"])
+            match_boost_summary = self._apply_perfect_shot_match_boosts(
                 int(state["team_id"]),
-                str(state.get("team_name") or ""),
+                state["team_name"],
+                state["match_copy_originals"],
             )
+            state["match_boost_players"] = match_boost_summary["match_boost_players"]
+            state["match_boost_entries"] = match_boost_summary["match_boost_entries"]
+            state["match_boost_writes"] = match_boost_summary["match_boost_writes"]
+            match_boost_players = match_boost_summary["match_boost_players"]
+            match_boost_entries = match_boost_summary["match_boost_entries"]
+            match_boost_writes = match_boost_summary["match_boost_writes"]
 
         return {
             "active": True,
             "entry_base": hex(int(state["entry_base"])),
             "target_team_name": state["team_name"],
             "team_block_index": state["team_block_index"],
-            "ai_delta_written": ai_delta_written,
-            **team_refresh_summary,
+            "ai_delta_written": bool(
+                runtime_applied.get("ai_team_delta") or runtime_applied.get("human_team_delta")
+            ),
+            "ai_team_delta_written": bool(runtime_applied.get("ai_team_delta")),
+            "human_team_delta_written": bool(runtime_applied.get("human_team_delta")),
+            "coverage_delta_written": bool(runtime_applied.get("coverage_delta")),
+            "impact_delta_written": bool(runtime_applied.get("impact_delta")),
+            "runtime_patch_writes": int(runtime_patch_summary["writes"]),
+            "legacy_state_writes": legacy_state_writes,
+            "match_boost_players": match_boost_players,
+            "match_boost_entries": match_boost_entries,
+            "match_boost_writes": match_boost_writes,
         }
 
     def stop_perfect_shot_beta(self) -> Dict[str, Any]:
@@ -2121,18 +2839,24 @@ class PlayerManager:
         if not state:
             return {"active": False, "restored": False}
 
-        restored = bool(
-            self.mem.write_bytes(
-                int(state["ai_delta_address"]),
-                state["original_ai_delta"],
-            )
+        restored_runtime_writes = self._restore_runtime_perfect_shot_patches(
+            state.get("runtime_patch_originals", {})
+        )
+        restored_match_writes = self._restore_perfect_shot_match_boosts(
+            state.get("match_copy_originals", {})
+        )
+        restored_legacy_state_writes = self._restore_legacy_perfect_shot_patches(
+            state.get("legacy_state_originals", {})
         )
         legacy_cleared = self._clear_legacy_perfect_shot_state()
         team_name = state.get("team_name", "Unknown")
         self._perfect_shot_beta_state = None
         return {
             "active": False,
-            "restored": restored,
+            "restored": restored_runtime_writes > 0,
+            "restored_runtime_writes": restored_runtime_writes,
+            "restored_match_writes": restored_match_writes,
+            "restored_legacy_state_writes": restored_legacy_state_writes,
             "legacy_cleared": legacy_cleared,
             "target_team_name": team_name,
         }
@@ -2186,6 +2910,16 @@ class PlayerManager:
             "entry_base": hex(int(state["entry_base"])) if state.get("entry_base") else None,
             "target_team_name": state.get("team_name"),
             "team_block_index": state.get("team_block_index"),
+            "representative_player": state.get("representative_player"),
+            "match_boost_players": state.get("match_boost_players", 0),
+            "match_boost_entries": state.get("match_boost_entries", 0),
+            "match_boost_writes": state.get("match_boost_writes", 0),
+            "runtime_patch_writes": state.get("runtime_patch_writes", 0),
+            "ai_team_delta_written": bool(state.get("ai_team_delta")),
+            "human_team_delta_written": bool(state.get("human_team_delta")),
+            "coverage_delta_written": bool(state.get("coverage_delta")),
+            "impact_delta_written": bool(state.get("impact_delta")),
+            "legacy_state_writes": state.get("legacy_state_writes", 0),
             "legacy_manager_base": hex(legacy_manager_base) if legacy_manager_base is not None else None,
             "legacy_entries": legacy_entries,
         }
