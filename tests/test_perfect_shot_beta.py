@@ -290,6 +290,8 @@ class PerfectShotBetaTests(unittest.TestCase):
 
     def test_refresh_perfect_shot_beta_reapplies_zero_buffer(self):
         self.pm.start_perfect_shot_beta(self.player)
+        driving_layup = self.config.find_attribute_by_description("Driving Layup")
+        three_point = self.config.find_attribute_by_description("Three-Point Shot")
         self.mem.write_bytes_at(
             self.runtime_entry + SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET,
             bytes([7] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
@@ -308,6 +310,8 @@ class PerfectShotBetaTests(unittest.TestCase):
         )
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             self.mem.write_bytes_at(self.legacy_entry + offset, bytes(len(patch_bytes)))
+        self.mem.write_uint8(self.player.record_address + driving_layup.offset, 25)
+        self.mem.write_uint8(self.player.record_address + three_point.offset, 25)
 
         summary = self.pm.refresh_perfect_shot_beta()
 
@@ -365,6 +369,9 @@ class PerfectShotBetaTests(unittest.TestCase):
                 bytes(len(patch_bytes)),
             )
         self.assertEqual(summary["legacy_state_writes"], 0)
+        self.assertGreater(summary["roster_boost_writes"], 0)
+        self.assertEqual(self.pm._read_attribute_direct(self.player, driving_layup), 99)
+        self.assertEqual(self.pm._read_attribute_direct(self.player, three_point), 99)
 
     def test_stop_perfect_shot_beta_restores_original_ai_delta(self):
         self.pm.start_perfect_shot_beta(self.player)

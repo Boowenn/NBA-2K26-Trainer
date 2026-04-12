@@ -3162,6 +3162,14 @@ class PlayerManager:
         if state["refresh_counter"] % PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL == 0:
             self._clear_match_compact_cache_for_team(int(state["team_id"]), state["team_name"])
 
+        roster_boost_summary = self._apply_perfect_shot_roster_boosts(
+            int(state["team_id"]),
+            state["team_name"],
+            state["roster_originals"],
+        )
+        state["roster_boost_players"] = roster_boost_summary["roster_boost_players"]
+        state["roster_boost_writes"] = roster_boost_summary["roster_boost_writes"]
+
         match_boost_summary = self._apply_perfect_shot_match_boosts(
             int(state["team_id"]),
             state["team_name"],
@@ -3185,6 +3193,8 @@ class PlayerManager:
             "impact_delta_written": bool(runtime_applied.get("impact_delta")),
             "runtime_patch_writes": int(runtime_patch_summary["writes"]),
             "legacy_state_writes": legacy_state_writes,
+            "roster_boost_players": roster_boost_summary["roster_boost_players"],
+            "roster_boost_writes": roster_boost_summary["roster_boost_writes"],
             "match_boost_players": match_boost_summary["match_boost_players"],
             "match_boost_entries": match_boost_summary["match_boost_entries"],
             "match_boost_writes": match_boost_summary["match_boost_writes"],
