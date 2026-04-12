@@ -3,6 +3,8 @@ from pathlib import Path
 
 from nba2k26_trainer.core.offsets import initialize_offsets
 from nba2k26_trainer.models.player import (
+    PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED,
+    PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED,
     PERFECT_SHOT_ENTRY_COUNT_OFFSET,
     PERFECT_SHOT_ENABLE_OFFSET,
     PERFECT_SHOT_ENTRY_ARRAY_OFFSET,
@@ -221,7 +223,7 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.assertEqual(summary["target_team_name"], "Lakers")
         self.assertEqual(summary["team_block_index"], 0)
         self.assertEqual(summary["representative_player"], "Luka Doncic")
-        self.assertTrue(summary["ai_delta_written"])
+        self.assertFalse(summary["ai_delta_written"])
         self.assertEqual(summary["match_boost_players"], 1)
         self.assertEqual(summary["match_boost_entries"], 2)
         self.assertGreater(summary["match_boost_writes"], 0)
@@ -233,33 +235,33 @@ class PerfectShotBetaTests(unittest.TestCase):
                 self.runtime_entry + SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            self.original_ai_team_delta,
         )
         self.assertEqual(
             self.mem.read_bytes(
                 self.runtime_entry + SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            self.original_ai_delta,
         )
         self.assertEqual(
             self.mem.read_bytes(
                 self.runtime_entry + SHOT_RUNTIME_COVERAGE_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            self.original_coverage_delta,
         )
         self.assertEqual(
             self.mem.read_bytes(
                 self.runtime_entry + SHOT_RUNTIME_IMPACT_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            self.original_impact_delta,
         )
         for name, offset, patch_bytes in SHOT_RUNTIME_PERFECT_PATCHES:
             self.assertEqual(
                 self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
-                patch_bytes,
+                self.runtime_patch_originals[name],
             )
         self.assertEqual(self.mem.read_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET), 0)
         self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET), 0)
@@ -267,13 +269,15 @@ class PerfectShotBetaTests(unittest.TestCase):
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             self.assertEqual(
                 self.mem.read_bytes(self.legacy_entry + offset, len(patch_bytes)),
-                patch_bytes,
+                self.legacy_patch_originals[offset],
             )
-        self.assertEqual(summary["legacy_state_writes"], len(PERFECT_SHOT_LEGACY_STATE_PATCHES))
-        self.assertTrue(summary["ai_team_delta_written"])
-        self.assertTrue(summary["human_team_delta_written"])
-        self.assertTrue(summary["coverage_delta_written"])
-        self.assertTrue(summary["impact_delta_written"])
+        self.assertEqual(summary["legacy_state_writes"], 0)
+        self.assertEqual(summary["runtime_patch_writes"], 0)
+        self.assertEqual(summary["legacy_cleared"], True)
+        self.assertEqual(summary["ai_team_delta_written"], PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED)
+        self.assertEqual(summary["human_team_delta_written"], PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED)
+        self.assertEqual(summary["coverage_delta_written"], PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED)
+        self.assertEqual(summary["impact_delta_written"], PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED)
 
         driving_layup = self.config.find_attribute_by_description("Driving Layup")
         deadeye = self.config.find_attribute_by_description("Deadeye")
@@ -304,7 +308,7 @@ class PerfectShotBetaTests(unittest.TestCase):
         summary = self.pm.refresh_perfect_shot_beta()
 
         self.assertTrue(summary["active"])
-        self.assertTrue(summary["ai_delta_written"])
+        self.assertFalse(summary["ai_delta_written"])
         self.assertNotIn("boosted_players", summary)
         self.assertNotIn("boosted_attributes", summary)
         self.assertEqual(self.pm.god_mode_team_calls, 0)
@@ -313,40 +317,50 @@ class PerfectShotBetaTests(unittest.TestCase):
                 self.runtime_entry + SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            bytes([7] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
         )
         self.assertEqual(
             self.mem.read_bytes(
                 self.runtime_entry + SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            bytes([9] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
         )
         self.assertEqual(
             self.mem.read_bytes(
                 self.runtime_entry + SHOT_RUNTIME_COVERAGE_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            bytes([5] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
         )
         self.assertEqual(
             self.mem.read_bytes(
                 self.runtime_entry + SHOT_RUNTIME_IMPACT_DELTA_OFFSET,
                 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE,
             ),
-            bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
+            bytes([3] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
         )
         for name, offset, patch_bytes in SHOT_RUNTIME_PERFECT_PATCHES:
+            if offset == SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET:
+                expected_bytes = bytes([7] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
+            elif offset == SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET:
+                expected_bytes = bytes([9] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
+            elif offset == SHOT_RUNTIME_COVERAGE_DELTA_OFFSET:
+                expected_bytes = bytes([5] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
+            elif offset == SHOT_RUNTIME_IMPACT_DELTA_OFFSET:
+                expected_bytes = bytes([3] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE)
+            else:
+                expected_bytes = self.runtime_patch_originals[name]
             self.assertEqual(
                 self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
-                patch_bytes,
+                expected_bytes,
             )
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             self.assertEqual(
                 self.mem.read_bytes(self.legacy_entry + offset, len(patch_bytes)),
-                patch_bytes,
+                bytes(len(patch_bytes)),
             )
-        self.assertEqual(summary["legacy_state_writes"], len(PERFECT_SHOT_LEGACY_STATE_PATCHES))
+        self.assertEqual(summary["legacy_state_writes"], 0)
 
     def test_stop_perfect_shot_beta_restores_original_ai_delta(self):
         self.pm.start_perfect_shot_beta(self.player)
@@ -356,7 +370,8 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.assertFalse(summary["active"])
         self.assertTrue(summary["restored"])
         self.assertGreater(summary["restored_match_writes"], 0)
-        self.assertEqual(summary["restored_legacy_state_writes"], len(PERFECT_SHOT_LEGACY_STATE_PATCHES))
+        self.assertGreater(summary["restored_roster_writes"], 0)
+        self.assertEqual(summary["restored_legacy_state_writes"], 0)
         self.assertEqual(summary["target_team_name"], "Lakers")
         self.assertEqual(
             self.mem.read_bytes(
@@ -422,13 +437,25 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.assertEqual(state["representative_player"], "Luka Doncic")
         self.assertEqual(state["match_boost_players"], 1)
         self.assertEqual(state["match_boost_entries"], 2)
-        self.assertTrue(state["ai_team_delta_written"])
-        self.assertTrue(state["human_team_delta_written"])
-        self.assertTrue(state["coverage_delta_written"])
-        self.assertTrue(state["impact_delta_written"])
-        self.assertEqual(state["legacy_state_writes"], len(PERFECT_SHOT_LEGACY_STATE_PATCHES))
+        self.assertFalse(state["ai_team_delta_written"])
+        self.assertFalse(state["human_team_delta_written"])
+        self.assertFalse(state["coverage_delta_written"])
+        self.assertFalse(state["impact_delta_written"])
+        self.assertEqual(state["legacy_state_writes"], 0)
         self.assertEqual(state["legacy_manager_base"], hex(self.manager_base))
         self.assertEqual(state["legacy_entries"][0]["base"], hex(self.legacy_entry))
+
+    def test_refresh_perfect_shot_beta_auto_stops_when_match_context_disappears(self):
+        self.pm.start_perfect_shot_beta(self.player)
+        self.pm.fake_match_entries = []
+
+        summary = self.pm.refresh_perfect_shot_beta()
+
+        self.assertFalse(summary["active"])
+        self.assertTrue(summary["auto_stopped"])
+        self.assertTrue(summary["restore_skipped"])
+        self.assertIn("No active in-match copies", summary["reason"])
+        self.assertFalse(self.pm.get_perfect_shot_beta_state()["active"])
 
 
 if __name__ == "__main__":

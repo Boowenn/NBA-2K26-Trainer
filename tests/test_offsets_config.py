@@ -15,8 +15,8 @@ class OffsetsConfigTests(unittest.TestCase):
 
     def test_player_table_pointer_matches_known_good_snapshot(self):
         player_table = self.raw["player_table"]
-        self.assertEqual(player_table["base_pointer"], 0x79D7EA0)
-        self.assertEqual(player_table["base_pointer_hex"].lower(), "0x79d7ea0")
+        self.assertEqual(player_table["base_pointer"], 0x7DFBF50)
+        self.assertEqual(player_table["base_pointer_hex"].lower(), "0x7dfbf50")
 
     def test_overall_rating_offset_matches_known_good_snapshot(self):
         overall_attr = next(

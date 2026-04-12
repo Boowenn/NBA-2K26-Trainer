@@ -450,11 +450,13 @@ class AttributeEditorWidget(QWidget):
             f" Coverage={'yes' if summary.get('coverage_delta_written') else 'no'}"
             f" Impact={'yes' if summary.get('impact_delta_written') else 'no'}",
             f"Shot tuning patches applied: {summary.get('runtime_patch_writes', 0)}",
+            "Shared runtime shot patches stay disabled until they can be scoped to one team safely.",
             f"Legacy global lock cleared: {'yes' if summary.get('legacy_cleared') else 'no'}",
+            f"Temporary roster shooting boosts: {summary.get('roster_boost_players', 0)} players / {summary.get('roster_boost_writes', 0)} writes",
             f"Live match players boosted: {summary.get('match_boost_players', 0)}",
             f"Live match entries boosted: {summary.get('match_boost_entries', 0)}",
             f"Live match writes applied: {summary.get('match_boost_writes', 0)}",
-            "Player attributes are left unchanged by Lock Green.",
+            "All temporary Lock Green boosts are restored when you stop the toggle.",
         ]
         QMessageBox.information(self, "Lock Green Beta Enabled", "\n".join(lines))
 
@@ -467,11 +469,14 @@ class AttributeEditorWidget(QWidget):
         if not summary.get("active"):
             self._perfect_shot_timer.stop()
             self._set_perfect_shot_button_state(False)
+            reason = summary.get("reason")
+            if reason:
+                QMessageBox.information(self, "Lock Green Beta Stopped", str(reason))
 
     def set_player_manager(self, mgr: Optional[PlayerManager]):
         if mgr is None:
             self._perfect_shot_timer.stop()
             self._set_perfect_shot_button_state(False)
             if self.player_mgr is not None:
-                self.player_mgr.stop_perfect_shot_beta()
+                self.player_mgr.stop_perfect_shot_beta(restore_live_memory=False)
         self.player_mgr = mgr

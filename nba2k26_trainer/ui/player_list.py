@@ -179,3 +179,22 @@ class PlayerListWidget(QWidget):
         if row < len(self._filtered_players):
             return self._filtered_players[row].index
         return None
+
+    def select_player_index(self, player_index: int) -> bool:
+        """Restore a selected player after the table has been rebuilt."""
+        for row in range(self.table.rowCount()):
+            idx_item = self.table.item(row, 5)
+            if idx_item is None:
+                continue
+            try:
+                if int(idx_item.text()) != player_index:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            self.table.selectRow(row)
+            name_item = self.table.item(row, 0)
+            if name_item is not None:
+                self.table.scrollToItem(name_item, QAbstractItemView.PositionAtCenter)
+            return True
+        return False

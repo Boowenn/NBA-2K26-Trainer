@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from nba2k26_trainer.core.offsets import initialize_offsets
-from nba2k26_trainer.models.player import PlayerManager
+from nba2k26_trainer.models.player import Player, PlayerManager, _is_valid_name
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +14,15 @@ NOISE_TABLE_BASE = 0x700000
 
 def _encode_wstring(text: str) -> bytes:
     return text.encode("utf-16-le") + b"\x00\x00"
+
+
+def _alpha_name(index: int, prefix: str) -> str:
+    letters = []
+    value = index
+    for _ in range(4):
+        letters.append(chr(ord("A") + (value % 26)))
+        value //= 26
+    return prefix + "".join(letters)
 
 
 class FakeMemory:
@@ -74,6 +83,7 @@ class FakeMemory:
         mask = ((1 << bit_length) - 1) << shift
         new_value = (current_value & ~mask) | ((value << shift) & mask)
         self.write_bytes_at(address + byte_offset, new_value.to_bytes(total_bytes, byteorder="little"))
+        return True
 
 
 class PlayerTableScoringTests(unittest.TestCase):
@@ -293,6 +303,59 @@ class PlayerTableScoringTests(unittest.TestCase):
 
         self.assertEqual(best, NOISE_TABLE_BASE)
 
+    def test_pick_best_player_table_prefers_full_roster_over_partial_snapshot(self):
+        full_team = 0x970000
+        partial_team = 0x971000
+        self._write_team_record(full_team, "Lakers")
+        self._write_team_record(partial_team, "2K Sports")
+
+        full_players = [
+            ("Luka", "Doncic", 1999, 98, full_team),
+            ("Austin", "Reaves", 1998, 87, full_team),
+            ("LeBron", "James", 1984, 94, full_team),
+            ("Rui", "Hachimura", 1998, 79, full_team),
+        ]
+        for index in range(600):
+            first_name, last_name, birth_year, overall, team_ptr = full_players[index % len(full_players)]
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=overall,
+                team_ptr=team_ptr,
+            )
+
+        partial_players = [
+            ("Alfredo", "Chavez", 1991, 71, partial_team),
+            ("Jorge", "Fernandez", 1990, 70, partial_team),
+            ("Pablo", "Garcia", 1992, 64, partial_team),
+            ("Anthony", "Edwards", 2001, 95, full_team),
+        ]
+        for index in range(275):
+            first_name, last_name, birth_year, overall, team_ptr = partial_players[index % len(partial_players)]
+            self._write_record(
+                NOISE_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=overall,
+                team_ptr=team_ptr,
+                team_ptr_offset=208,
+            )
+
+        self.pm.set_roster_mode("auto")
+        best = self.pm._pick_best_player_table(
+            [
+                (NOISE_TABLE_BASE, "module_base + partial"),
+                (PLAYER_TABLE_BASE, "module_base + full"),
+            ]
+        )
+
+        self.assertEqual(best, PLAYER_TABLE_BASE)
+
     def test_resolve_live_team_ptr_offset_prefers_current_team_assignments(self):
         current_teams = [
             (0x950000, "Lakers"),
@@ -406,6 +469,390 @@ class PlayerTableScoringTests(unittest.TestCase):
         self.pm.begin_refresh(force_rescan=True)
         self.assertNotIn(PLAYER_TABLE_BASE, self.pm._module_ref_count_cache)
         self.assertNotIn(PLAYER_TABLE_BASE, self.pm._live_overall_attr_cache)
+
+    def test_live_roster_signature_changes_when_sampled_roster_data_changes(self):
+        players = [
+            ("Luka", "Doncic", 1999, 94),
+            ("Austin", "Reaves", 1998, 85),
+            ("Herbert", "Jones", 1998, 84),
+            ("Daniel", "Gafford", 1998, 82),
+        ]
+        for index in range(120):
+            first_name, last_name, birth_year, overall = players[index % len(players)]
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=overall,
+                team_ptr=0x950000 + index * 0x20,
+            )
+
+        self.pm._resolve_table_base = lambda progress_callback=None, use_cached=True: PLAYER_TABLE_BASE
+
+        before = self.pm.get_live_roster_signature(force_refresh=True)
+        self._write_record(
+            PLAYER_TABLE_BASE,
+            50,
+            first_name="LeBron",
+            last_name="James",
+            birth_year=1984,
+            overall=97,
+            team_ptr=0x990000,
+        )
+        after = self.pm.get_live_roster_signature(force_refresh=True)
+
+        self.assertIsNotNone(before)
+        self.assertIsNotNone(after)
+        self.assertNotEqual(before, after)
+
+    def test_is_valid_name_rejects_non_latin_gibberish(self):
+        self.assertTrue(_is_valid_name("Luka"))
+        self.assertTrue(_is_valid_name("Nicolas Batum"))
+        self.assertTrue(_is_valid_name("Nikola Jokic"))
+        self.assertFalse(_is_valid_name("\u3f97\u0f61\uf921\u212b\uc4ad"))
+        self.assertFalse(_is_valid_name("\u4554\u4358\u4f4f\u4452"))
+
+    def test_pick_best_player_table_rejects_gibberish_match_entity_table(self):
+        real_players = [
+            ("Luka", "Doncic", 1999),
+            ("Austin", "Reaves", 1998),
+            ("Herbert", "Jones", 1998),
+            ("Daniel", "Gafford", 1998),
+        ]
+        for index in range(24):
+            first_name, last_name, birth_year = real_players[index % len(real_players)]
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=80,
+            )
+
+        gibberish_names = [
+            ("\u3f97\u0f61\uf921\u212b", "\uc4ad\u17e4\u8db7\uc18a", 1999),
+            ("\u4554\u4358\u4f4f\u4452", "\u5400\u5845\u4f43\u524f", 1998),
+            ("\u6d7a\ud120\u40c2", "\ua0c5\u6d7a\ud120", 1997),
+            ("\ue0ee\uf50e\u0ec0", "\u30ec\u6203\ua1c8", 1996),
+        ]
+        for index in range(24):
+            first_name, last_name, birth_year = gibberish_names[index % len(gibberish_names)]
+            self._write_record(
+                NOISE_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=80,
+            )
+
+        self.pm._count_module_pointer_refs = lambda table_base: {
+            PLAYER_TABLE_BASE: 11,
+            NOISE_TABLE_BASE: 70,
+        }.get(table_base, 0)
+
+        self.pm.set_roster_mode("auto")
+        best = self.pm._pick_best_player_table(
+            [
+                (PLAYER_TABLE_BASE, "module_base + real roster"),
+                (NOISE_TABLE_BASE, "memory scan live match entities"),
+            ]
+        )
+
+        self.assertEqual(best, PLAYER_TABLE_BASE)
+
+    def test_table_without_birth_years_or_team_refs_is_not_promising(self):
+        players = [
+            ("Luka", "Doncic"),
+            ("Austin", "Reaves"),
+            ("Herbert", "Jones"),
+            ("Daniel", "Gafford"),
+        ]
+        for index, (first_name, last_name) in enumerate(players):
+            self._write_record(
+                NOISE_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=None,
+                overall=80,
+                team_ptr=0x1234,
+            )
+
+        metrics = self.pm._score_player_table_base(NOISE_TABLE_BASE)
+
+        self.assertEqual(metrics.valid_names, 4)
+        self.assertEqual(metrics.valid_overall, 4)
+        self.assertEqual(metrics.valid_birth_year, 0)
+        self.assertEqual(metrics.valid_team_refs, 0)
+        self.assertFalse(self.pm._is_promising_player_table(metrics))
+
+    def test_auto_mode_prefers_currentish_roster_over_legend_heavy_snapshot(self):
+        current_team = 0x970000
+        legend_team = 0x980000
+        self._write_team_record(current_team, "Lakers")
+        self._write_team_record(legend_team, "Lakers")
+
+        currentish_players = [
+            ("Luka", "Doncic", 1999, current_team),
+            ("Austin", "Reaves", 1998, current_team),
+            ("Herbert", "Jones", 1998, current_team),
+            ("Daniel", "Gafford", 1998, current_team),
+            ("LeBron", "James", 1984, current_team),
+            ("Stephen", "Curry", 1988, current_team),
+            ("Jayson", "Tatum", 1998, current_team),
+            ("Victor", "Wembanyama", 2004, current_team),
+        ]
+        legend_heavy_players = [
+            ("Magic", "Johnson", 1959, legend_team),
+            ("James", "Worthy", 1961, legend_team),
+            ("Jerry", "West", 1938, legend_team),
+            ("Elgin", "Baylor", 1934, legend_team),
+            ("Vlade", "Divac", 1968, legend_team),
+        ]
+
+        for index in range(120):
+            first_name, last_name, birth_year, team_ptr = currentish_players[index % len(currentish_players)]
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=80,
+                team_ptr=team_ptr,
+            )
+
+            first_name, last_name, birth_year, team_ptr = legend_heavy_players[index % len(legend_heavy_players)]
+            self._write_record(
+                NOISE_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=80,
+                team_ptr=team_ptr,
+            )
+
+        self.pm.set_roster_mode("auto")
+        best = self.pm._pick_best_player_table(
+            [
+                (PLAYER_TABLE_BASE, "mixed current save"),
+                (NOISE_TABLE_BASE, "legend heavy snapshot"),
+            ]
+        )
+
+        self.assertEqual(best, PLAYER_TABLE_BASE)
+
+    def test_resolve_table_base_scans_past_weak_config_snapshot(self):
+        self.pm.set_roster_mode("auto")
+
+        weak_metrics = type(
+            "Metrics",
+            (),
+            {
+                "module_ref_count": 2,
+                "valid_names": 24,
+                "valid_birth_year": 24,
+                "valid_team_refs": 24,
+                "estimated_player_count": 275,
+            },
+        )()
+        strong_metrics = type(
+            "Metrics",
+            (),
+            {
+                "module_ref_count": 10,
+                "valid_names": 24,
+                "valid_birth_year": 24,
+                "valid_team_refs": 24,
+                "estimated_player_count": 600,
+            },
+        )()
+
+        self.pm._get_config_player_table_candidates = lambda: [(NOISE_TABLE_BASE, "module pointer")]
+        self.pm._matches_requested_roster_mode = lambda _metrics: True
+
+        def fake_pick(candidates, _progress_callback=None, *, include_module_refs=True):
+            bases = {base for base, _source in candidates}
+            if bases == {NOISE_TABLE_BASE}:
+                return NOISE_TABLE_BASE
+            if PLAYER_TABLE_BASE in bases:
+                return PLAYER_TABLE_BASE
+            return None
+
+        def fake_score(table_base, include_module_refs=True):
+            if table_base == NOISE_TABLE_BASE:
+                return weak_metrics
+            if table_base == PLAYER_TABLE_BASE:
+                return strong_metrics
+            raise AssertionError(f"unexpected table base 0x{table_base:X}")
+
+        self.pm._pick_best_player_table = fake_pick
+        self.pm._score_player_table_base = fake_score
+
+        with patch("nba2k26_trainer.models.player.scan_for_player_table_candidates", return_value=[(PLAYER_TABLE_BASE, 50)]):
+            resolved = self.pm._resolve_table_base()
+
+        self.assertEqual(resolved, PLAYER_TABLE_BASE)
+        self.assertEqual(self.pm._table_base, PLAYER_TABLE_BASE)
+
+    def test_scan_players_retries_when_selected_table_is_duplicate_snapshot(self):
+        duplicate_pattern = [
+            ("George", "Mikan"),
+            ("LeBron", "James"),
+            ("Michael", "Jordan"),
+            ("Luka", "Doncic"),
+            ("LeBron", "James"),
+            ("Luka", "Doncic"),
+            ("Austin", "Reaves"),
+            ("Rui", "Hachimura"),
+        ]
+        for index in range(600):
+            first_name, last_name = duplicate_pattern[index % len(duplicate_pattern)]
+            self._write_record(
+                NOISE_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=1998,
+                overall=80,
+            )
+
+        for index in range(600):
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=_alpha_name(index, "F"),
+                last_name=_alpha_name(index, "L"),
+                birth_year=1990 + (index % 10),
+                overall=75 + (index % 20),
+            )
+
+        resolved_bases = iter([NOISE_TABLE_BASE, PLAYER_TABLE_BASE])
+        self.pm._resolve_table_base = lambda progress_callback=None: next(resolved_bases)
+
+        players = self.pm.scan_players()
+        full_names = [player.full_name for player in players]
+
+        self.assertEqual(self.pm._table_base, PLAYER_TABLE_BASE)
+        self.assertEqual(len(players), 600)
+        self.assertEqual(len(full_names), len(set(full_names)))
+
+    def test_write_all_attributes_updates_multiple_contract_years(self):
+        player = Player(
+            index=0,
+            record_address=PLAYER_TABLE_BASE,
+            first_name="Luka",
+            last_name="Doncic",
+        )
+        year1 = self.config.find_attribute_by_description("Year 1 Salary")
+        year2 = self.config.find_attribute_by_description("Year 2 Salary")
+        year3 = self.config.find_attribute_by_description("Year 3 Salary")
+        year4 = self.config.find_attribute_by_description("Year 4 Salary")
+        contract_years = self.config.find_attribute_by_description("Contract Years Left")
+
+        self.mem.write_bitfield(
+            player.record_address + contract_years.offset,
+            contract_years.bit_start,
+            contract_years.bit_length,
+            1,
+        )
+        self.mem.write_bitfield(player.record_address + year1.offset, year1.bit_start, year1.bit_length, 45000000)
+        self.mem.write_bitfield(player.record_address + year2.offset, year2.bit_start, year2.bit_length, 49000000)
+        self.mem.write_bitfield(player.record_address + year3.offset, year3.bit_start, year3.bit_length, 53000000)
+        self.mem.write_bitfield(player.record_address + year4.offset, year4.bit_start, year4.bit_length, 57000000)
+
+        updates = {
+            year2.name: 49111111,
+            year3.name: 53222222,
+            year4.name: 57333333,
+        }
+        results = self.pm.write_all_attributes(player, updates)
+
+        self.assertTrue(results[year2.name])
+        self.assertTrue(results[year3.name])
+        self.assertTrue(results[year4.name])
+        self.assertEqual(self.pm.read_attribute(player, year1), 45000000)
+        self.assertEqual(self.pm.read_attribute(player, year2), 49111111)
+        self.assertEqual(self.pm.read_attribute(player, year3), 53222222)
+        self.assertEqual(self.pm.read_attribute(player, year4), 57333333)
+        self.assertEqual(self.pm.read_attribute(player, contract_years), 4)
+
+    def test_write_attribute_contract_years_expands_future_salary_slots(self):
+        player = Player(
+            index=0,
+            record_address=PLAYER_TABLE_BASE,
+            first_name="LeBron",
+            last_name="James",
+        )
+        year1 = self.config.find_attribute_by_description("Year 1 Salary")
+        year2 = self.config.find_attribute_by_description("Year 2 Salary")
+        year3 = self.config.find_attribute_by_description("Year 3 Salary")
+        year4 = self.config.find_attribute_by_description("Year 4 Salary")
+        year5 = self.config.find_attribute_by_description("Year 5 Salary")
+        contract_years = self.config.find_attribute_by_description("Contract Years Left")
+
+        self.mem.write_bitfield(player.record_address + year1.offset, year1.bit_start, year1.bit_length, 52627153)
+        self.mem.write_bitfield(player.record_address + year2.offset, year2.bit_start, year2.bit_length, 0)
+        self.mem.write_bitfield(player.record_address + year3.offset, year3.bit_start, year3.bit_length, 0)
+        self.mem.write_bitfield(player.record_address + year4.offset, year4.bit_start, year4.bit_length, 0)
+        self.mem.write_bitfield(player.record_address + year5.offset, year5.bit_start, year5.bit_length, 7777777)
+        self.mem.write_bitfield(
+            player.record_address + contract_years.offset,
+            contract_years.bit_start,
+            contract_years.bit_length,
+            1,
+        )
+
+        self.assertTrue(self.pm.write_attribute(player, contract_years, 4))
+        self.assertEqual(self.pm.read_attribute(player, contract_years), 4)
+        self.assertEqual(self.pm.read_attribute(player, year1), 52627153)
+        self.assertEqual(self.pm.read_attribute(player, year2), 52627153)
+        self.assertEqual(self.pm.read_attribute(player, year3), 52627153)
+        self.assertEqual(self.pm.read_attribute(player, year4), 52627153)
+        self.assertEqual(self.pm.read_attribute(player, year5), 0)
+
+    def test_write_all_attributes_contract_years_truncates_future_salary_slots(self):
+        player = Player(
+            index=0,
+            record_address=PLAYER_TABLE_BASE,
+            first_name="Luka",
+            last_name="Doncic",
+        )
+        salary_attrs = [
+            self.config.find_attribute_by_description(f"Year {index} Salary")
+            for index in range(1, 7)
+        ]
+        contract_years = self.config.find_attribute_by_description("Contract Years Left")
+        starting_values = [45999660, 49641600, 53612928, 57584256, 1200000, 800000]
+        for attr, value in zip(salary_attrs, starting_values):
+            self.mem.write_bitfield(player.record_address + attr.offset, attr.bit_start, attr.bit_length, value)
+        self.mem.write_bitfield(
+            player.record_address + contract_years.offset,
+            contract_years.bit_start,
+            contract_years.bit_length,
+            6,
+        )
+
+        results = self.pm.write_all_attributes(
+            player,
+            {
+                contract_years.name: 2,
+            },
+        )
+
+        self.assertTrue(results[contract_years.name])
+        self.assertEqual(self.pm.read_attribute(player, contract_years), 2)
+        self.assertEqual(self.pm.read_attribute(player, salary_attrs[0]), 45999660)
+        self.assertEqual(self.pm.read_attribute(player, salary_attrs[1]), 49641600)
+        self.assertEqual(self.pm.read_attribute(player, salary_attrs[2]), 0)
+        self.assertEqual(self.pm.read_attribute(player, salary_attrs[3]), 0)
+        self.assertEqual(self.pm.read_attribute(player, salary_attrs[4]), 0)
+        self.assertEqual(self.pm.read_attribute(player, salary_attrs[5]), 0)
 
 
 if __name__ == "__main__":

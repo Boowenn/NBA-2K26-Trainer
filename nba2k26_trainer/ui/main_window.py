@@ -13,6 +13,7 @@ from ..core.process import attach_to_game, is_process_running
 from ..core.offsets import initialize_offsets, get_offsets, get_default_offsets_path, OffsetConfig
 from ..core.memory import GameMemory
 from ..models.player import Player, PlayerManager
+from .. import __version__
 from .player_list import PlayerListWidget
 from .attribute_editor import AttributeEditorWidget
 from .batch_editor import BatchEditorDialog
@@ -32,8 +33,10 @@ class MainWindow(QMainWindow):
         self.players = []
         self._player_index_map = {}
         self.roster_mode = "auto"
+        self._refresh_in_progress = False
+        self._live_roster_signature = None
 
-        self.setWindowTitle("NBA 2K26 Trainer v2.1")
+        self.setWindowTitle(f"NBA 2K26 Trainer v{__version__}")
         self.setMinimumSize(1200, 750)
         self.resize(1400, 850)
 
@@ -126,6 +129,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.player_list)
 
         self.attr_editor = AttributeEditorWidget(self.config)
+        self.attr_editor.set_perfect_shot_team_resolver(self._resolve_lock_green_team_target)
         splitter.addWidget(self.attr_editor)
 
         splitter.setSizes([450, 750])
@@ -161,7 +165,7 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage(
                 f"Connected to NBA2K26.exe (Base: 0x{self.mem.base_address:X})"
             )
-            self._refresh_players()
+            self._refresh_players(force_rescan=True, preserve_selection=False)
             return
 
         # Connection failed
@@ -229,45 +233,102 @@ class MainWindow(QMainWindow):
             "  > Properties > General > Launch Options"
         )
 
-    def _refresh_players(self):
-        if self.player_mgr is None:
+    def _capture_selected_player_identity(self):
+        player = self.attr_editor.current_player
+        if player is None:
+            return None
+        return {
+            "index": player.index,
+            "full_name": player.full_name,
+            "team_name": player.team_name,
+        }
+
+    def _restore_selected_player(self, identity) -> None:
+        if not identity:
             return
 
-        self.statusbar.showMessage("Scanning player data ...")
-        self.btn_refresh.setEnabled(False)
-        from PyQt5.QtWidgets import QApplication
-        QApplication.processEvents()
+        player = self._player_index_map.get(identity.get("index"))
+        if player and player.full_name == identity.get("full_name"):
+            self.player_list.select_player_index(player.index)
+            self.attr_editor.load_player(player)
+            return
 
-        self.player_mgr.begin_refresh(force_rescan=False)
-        self.player_mgr.set_roster_mode(self.roster_mode)
+        full_name = identity.get("full_name")
+        team_name = identity.get("team_name")
+        for candidate in self.players:
+            if candidate.full_name == full_name and candidate.team_name == team_name:
+                self.player_list.select_player_index(candidate.index)
+                self.attr_editor.load_player(candidate)
+                return
 
-        def progress(msg):
-            self.statusbar.showMessage(msg)
+        for candidate in self.players:
+            if candidate.full_name == full_name:
+                self.player_list.select_player_index(candidate.index)
+                self.attr_editor.load_player(candidate)
+                return
+
+    def _refresh_players(self, *_args, force_rescan: bool = True, silent: bool = False, preserve_selection: bool = True):
+        if self.player_mgr is None:
+            return
+        if self._refresh_in_progress:
+            return
+
+        previous_players = self.players
+        previous_index_map = self._player_index_map
+        selected_identity = self._capture_selected_player_identity() if preserve_selection else None
+
+        self._refresh_in_progress = True
+
+        try:
+            self.statusbar.showMessage("Scanning player data ...")
+            self.btn_refresh.setEnabled(False)
+            from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
 
-        self.players = self.player_mgr.scan_players(progress_callback=progress)
-        self._player_index_map = {p.index: p for p in self.players}
-        self.player_list.set_players(self.players)
+            self.player_mgr.begin_refresh(force_rescan=force_rescan)
+            self.player_mgr.set_roster_mode(self.roster_mode)
 
-        self.btn_refresh.setEnabled(True)
+            def progress(msg):
+                self.statusbar.showMessage(msg)
+                QApplication.processEvents()
 
-        if len(self.players) == 0:
-            debug_info = self._debug_table_scan()
-            QMessageBox.warning(
-                self, "No Players Found",
-                f"Cannot find players in game memory.\n\n"
-                f"Module base: 0x{self.mem.base_address:X}\n"
-                f"Config pointer: 0x{self.config.player_table.base_pointer:X}\n\n"
-                f"Debug info:\n{debug_info}\n\n"
-                "Make sure you are in MyNBA/MyGM mode with a roster loaded.\n"
-                "The game must be past the main menu."
-            )
-        else:
-            base = self.player_mgr._table_base
-            base_str = f"0x{base:X}" if base else "unknown"
-            self.statusbar.showMessage(
-                f"Loaded {len(self.players)} players (table base: {base_str})"
-            )
+            new_players = self.player_mgr.scan_players(progress_callback=None if silent else progress)
+            if not new_players and silent:
+                self.players = previous_players
+                self._player_index_map = previous_index_map
+                self.statusbar.showMessage("Live roster probe found no stable roster change. Keeping current list.")
+                return
+
+            self.players = new_players
+            self._player_index_map = {p.index: p for p in self.players}
+            self.player_list.set_players(self.players)
+            self._restore_selected_player(selected_identity)
+
+            self._live_roster_signature = self.player_mgr.get_live_roster_signature(force_refresh=False)
+
+            if len(self.players) == 0:
+                if silent:
+                    self.statusbar.showMessage("Live roster probe did not resolve a usable player table.")
+                else:
+                    debug_info = self._debug_table_scan()
+                    QMessageBox.warning(
+                        self, "No Players Found",
+                        f"Cannot find players in game memory.\n\n"
+                        f"Module base: 0x{self.mem.base_address:X}\n"
+                        f"Config pointer: 0x{self.config.player_table.base_pointer:X}\n\n"
+                        f"Debug info:\n{debug_info}\n\n"
+                        "Make sure you are in MyNBA/MyGM mode with a roster loaded.\n"
+                        "The game must be past the main menu."
+                    )
+            else:
+                base = self.player_mgr._table_base
+                base_str = f"0x{base:X}" if base else "unknown"
+                self.statusbar.showMessage(
+                    f"Loaded {len(self.players)} players (table base: {base_str})"
+                )
+        finally:
+            self._refresh_in_progress = False
+            self.btn_refresh.setEnabled(self.player_mgr is not None)
 
     def _on_roster_mode_changed(self, *_args):
         if not hasattr(self, "roster_mode_combo"):
@@ -275,7 +336,7 @@ class MainWindow(QMainWindow):
         self.roster_mode = self.roster_mode_combo.currentData() or "auto"
         if self.player_mgr is not None:
             self.player_mgr.set_roster_mode(self.roster_mode)
-            self._refresh_players()
+            self._refresh_players(force_rescan=True)
 
     def _debug_table_scan(self) -> str:
         """Collect debug info about table scanning"""
@@ -328,6 +389,35 @@ class MainWindow(QMainWindow):
             self.attr_editor.load_player(player)
             self.statusbar.showMessage(f"Selected: {player.full_name} ({player.team_name})")
 
+    def _resolve_lock_green_team_target(self):
+        current_player = self.attr_editor.current_player
+        team_id = self.player_list.team_filter.currentData()
+        team_name = self.player_list.team_filter.currentText()
+
+        if team_id is not None and team_id != -1:
+            preferred_player = None
+            if current_player and current_player.team_id == team_id:
+                preferred_player = current_player
+            else:
+                preferred_player = next((p for p in self.players if p.team_id == team_id), None)
+
+            return {
+                "player": preferred_player,
+                "team_id": int(team_id),
+                "team_name": team_name,
+                "source": "team filter",
+            }
+
+        if current_player is not None:
+            return {
+                "player": current_player,
+                "team_id": current_player.team_id,
+                "team_name": current_player.team_name,
+                "source": "selected player",
+            }
+
+        return None
+
     def _open_batch_editor(self):
         if not self.players or self.player_mgr is None:
             QMessageBox.warning(self, "Warning", "Connect game and load players first")
@@ -341,7 +431,7 @@ class MainWindow(QMainWindow):
 
         dialog = BatchEditorDialog(self.config, self.player_mgr, batch_players, self)
         dialog.exec_()
-        self._refresh_players()
+        self._refresh_players(force_rescan=True)
 
     def _load_custom_offsets(self):
         filepath, _ = QFileDialog.getOpenFileName(
@@ -367,6 +457,25 @@ class MainWindow(QMainWindow):
                 self.btn_refresh.setEnabled(False)
                 self.btn_batch.setEnabled(False)
                 self.statusbar.showMessage("Game process closed")
+                self._live_roster_signature = None
+                return
+            self._sync_live_roster()
+
+    def _sync_live_roster(self):
+        if self.player_mgr is None or self._refresh_in_progress:
+            return
+
+        live_signature = self.player_mgr.get_live_roster_signature(force_refresh=False)
+        if live_signature is None:
+            return
+
+        if self._live_roster_signature is None:
+            self._live_roster_signature = live_signature
+            return
+
+        if live_signature != self._live_roster_signature:
+            self.statusbar.showMessage("Detected a live roster change. Resyncing player list ...")
+            self._refresh_players(force_rescan=True, silent=True, preserve_selection=True)
 
     def closeEvent(self, event):
         if self.mem:
