@@ -267,31 +267,7 @@ GOD_MODE_PROFILE_VALUES: Dict[str, int | str] = {
     "Play Discipline": "max",
 }
 
-PERFECT_SHOT_MATCH_PROFILE_VALUES: Dict[str, int] = {
-    "Driving Layup": 99,
-    "Float Game": 4,
-    "Layup Mix Master": 4,
-    "Paint Prodigy": 4,
-    "Physical Finisher": 4,
-    "Posterizer": 4,
-    "Rise Up": 4,
-    "Off Screen 3pt": 99,
-    "Contested 3pt": 99,
-    "Contested Mid": 99,
-    "Stepback 3pt": 99,
-    "Drive Pull Up 3pt": 99,
-    "Drive Pull Up Mid": 99,
-    "Transition Pull Up 3pt": 99,
-    "Drive": 99,
-    "Spot Up Drive": 99,
-    "Attack Strong": 99,
-    "Contest Shot": 99,
-    "Deadeye": 4,
-    "Limitless Range": 4,
-    "Mini Marksman": 4,
-    "Shifty Shooter": 4,
-}
-PERFECT_SHOT_ROSTER_PROFILE_VALUES: Dict[str, int] = {
+PERFECT_SHOT_CORE_PROFILE_VALUES: Dict[str, int] = {
     "Close Shot": 99,
     "Mid-Range Shot": 99,
     "Three-Point Shot": 99,
@@ -299,11 +275,6 @@ PERFECT_SHOT_ROSTER_PROFILE_VALUES: Dict[str, int] = {
     "Driving Layup": 99,
     "Shot IQ": 99,
     "Offensive Consistency": 99,
-    "Deadeye": 4,
-    "Limitless Range": 4,
-    "Mini Marksman": 4,
-    "Shifty Shooter": 4,
-    "Layup Mix Master": 4,
     "Shot Under Basket": 99,
     "Shot Close": 99,
     "Shot Mid": 99,
@@ -313,8 +284,29 @@ PERFECT_SHOT_ROSTER_PROFILE_VALUES: Dict[str, int] = {
     "Drive Pull Up Mid": 99,
     "Driving Layup Tendency": 99,
     "Contest Shot": 99,
+    "Deadeye": 4,
+    "Limitless Range": 4,
+    "Mini Marksman": 4,
+    "Shifty Shooter": 4,
+    "Layup Mix Master": 4,
 }
-PERFECT_SHOT_MATCH_REFRESH_INTERVAL = 25
+PERFECT_SHOT_MATCH_PROFILE_VALUES: Dict[str, int] = {
+    **PERFECT_SHOT_CORE_PROFILE_VALUES,
+    "Float Game": 4,
+    "Paint Prodigy": 4,
+    "Physical Finisher": 4,
+    "Posterizer": 4,
+    "Rise Up": 4,
+    "Off Screen 3pt": 99,
+    "Stepback 3pt": 99,
+    "Drive Pull Up 3pt": 99,
+    "Transition Pull Up 3pt": 99,
+    "Drive": 99,
+    "Spot Up Drive": 99,
+    "Attack Strong": 99,
+}
+PERFECT_SHOT_ROSTER_PROFILE_VALUES: Dict[str, int] = dict(PERFECT_SHOT_CORE_PROFILE_VALUES)
+PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL = 25
 # These runtime/legacy patch groups are shared across the live shot container.
 # Keep them disabled until we can reliably scope them to the selected team.
 PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED = False
@@ -3167,23 +3159,17 @@ class PlayerManager:
         state["runtime_patch_writes"] = int(runtime_patch_summary["writes"])
         state["legacy_state_writes"] = legacy_state_writes
         state["refresh_counter"] = int(state.get("refresh_counter", 0)) + 1
-        match_boost_players = int(state.get("match_boost_players", 0))
-        match_boost_entries = int(state.get("match_boost_entries", 0))
-        match_boost_writes = 0
-
-        if state["refresh_counter"] % PERFECT_SHOT_MATCH_REFRESH_INTERVAL == 0:
+        if state["refresh_counter"] % PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL == 0:
             self._clear_match_compact_cache_for_team(int(state["team_id"]), state["team_name"])
-            match_boost_summary = self._apply_perfect_shot_match_boosts(
-                int(state["team_id"]),
-                state["team_name"],
-                state["match_copy_originals"],
-            )
-            state["match_boost_players"] = match_boost_summary["match_boost_players"]
-            state["match_boost_entries"] = match_boost_summary["match_boost_entries"]
-            state["match_boost_writes"] = match_boost_summary["match_boost_writes"]
-            match_boost_players = match_boost_summary["match_boost_players"]
-            match_boost_entries = match_boost_summary["match_boost_entries"]
-            match_boost_writes = match_boost_summary["match_boost_writes"]
+
+        match_boost_summary = self._apply_perfect_shot_match_boosts(
+            int(state["team_id"]),
+            state["team_name"],
+            state["match_copy_originals"],
+        )
+        state["match_boost_players"] = match_boost_summary["match_boost_players"]
+        state["match_boost_entries"] = match_boost_summary["match_boost_entries"]
+        state["match_boost_writes"] = match_boost_summary["match_boost_writes"]
 
         return {
             "active": True,
@@ -3199,9 +3185,9 @@ class PlayerManager:
             "impact_delta_written": bool(runtime_applied.get("impact_delta")),
             "runtime_patch_writes": int(runtime_patch_summary["writes"]),
             "legacy_state_writes": legacy_state_writes,
-            "match_boost_players": match_boost_players,
-            "match_boost_entries": match_boost_entries,
-            "match_boost_writes": match_boost_writes,
+            "match_boost_players": match_boost_summary["match_boost_players"],
+            "match_boost_entries": match_boost_summary["match_boost_entries"],
+            "match_boost_writes": match_boost_summary["match_boost_writes"],
         }
 
     def stop_perfect_shot_beta(

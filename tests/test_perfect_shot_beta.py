@@ -281,8 +281,12 @@ class PerfectShotBetaTests(unittest.TestCase):
 
         driving_layup = self.config.find_attribute_by_description("Driving Layup")
         deadeye = self.config.find_attribute_by_description("Deadeye")
+        three_point = self.config.find_attribute_by_description("Three-Point Shot")
+        shot_iq = self.config.find_attribute_by_description("Shot IQ")
         self.assertEqual(self.pm.read_match_compact_attribute_values(self.player, driving_layup), [99, 99])
         self.assertEqual(self.pm.read_match_compact_attribute_values(self.player, deadeye), [4, 4])
+        self.assertEqual(self.pm._read_attribute_direct(self.player, three_point), 99)
+        self.assertEqual(self.pm._read_attribute_direct(self.player, shot_iq), 99)
 
     def test_refresh_perfect_shot_beta_reapplies_zero_buffer(self):
         self.pm.start_perfect_shot_beta(self.player)
@@ -413,8 +417,12 @@ class PerfectShotBetaTests(unittest.TestCase):
             )
         driving_layup = self.config.find_attribute_by_description("Driving Layup")
         deadeye = self.config.find_attribute_by_description("Deadeye")
+        three_point = self.config.find_attribute_by_description("Three-Point Shot")
+        shot_iq = self.config.find_attribute_by_description("Shot IQ")
         self.assertEqual(self.pm.read_match_compact_attribute_values(self.player, driving_layup), [0, 0])
         self.assertEqual(self.pm.read_match_compact_attribute_values(self.player, deadeye), [0, 0])
+        self.assertEqual(self.pm._read_attribute_direct(self.player, three_point), 25)
+        self.assertEqual(self.pm._read_attribute_direct(self.player, shot_iq), 25)
         self.assertEqual(self.pm.get_perfect_shot_beta_state()["active"], False)
 
     def test_start_perfect_shot_beta_for_team_works_without_selected_player(self):
