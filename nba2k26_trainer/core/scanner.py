@@ -215,10 +215,15 @@ def scan_for_player_table_candidates(
     max_candidates: int = 128,
 ) -> List[Tuple[int, int]]:
     search_patterns = [(_name, _encode_wstring(_name)) for _name in KNOWN_LAST_NAMES[:12]]
+    mem_handle = getattr(mem, "handle", None)
+    if mem_handle is None:
+        if progress_callback:
+            progress_callback("Skipping region scan: memory provider does not expose a process handle.")
+        return []
 
     region_sets = [
-        ("private writable", enum_candidate_regions(mem.handle, private_only=True, writable_only=True)),
-        ("private readable", enum_candidate_regions(mem.handle, private_only=True, writable_only=False)),
+        ("private writable", enum_candidate_regions(mem_handle, private_only=True, writable_only=True)),
+        ("private readable", enum_candidate_regions(mem_handle, private_only=True, writable_only=False)),
     ]
 
     discovered: dict[int, int] = {}
