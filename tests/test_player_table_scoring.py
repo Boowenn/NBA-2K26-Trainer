@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from nba2k26_trainer.core.offsets import initialize_offsets
 from nba2k26_trainer.models.player import PlayerManager
@@ -383,7 +384,8 @@ class PlayerTableScoringTests(unittest.TestCase):
 
         self.pm.set_roster_mode("current")
         self.pm._table_base = PLAYER_TABLE_BASE
-        players = self.pm.scan_players()
+        with patch("nba2k26_trainer.models.player.MIN_ACCEPTABLE_PLAYER_COUNT", 24):
+            players = self.pm.scan_players()
         players_by_name = {player.full_name: player for player in players}
         overall_attr = self.config.find_attribute_by_description("Overall Rating")
 
