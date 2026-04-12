@@ -339,6 +339,11 @@ SHOT_RUNTIME_PERFECT_PATCHES: Tuple[Tuple[str, int, bytes], ...] = (
     ("timing_variability_bad_shooter", 0x161C, bytes(4)),
     ("ai_timing_variance_standard", 0x1624, bytes(4)),
     ("ai_timing_variance_reduced", 0x162C, bytes(4)),
+    ("max_timing_error_pct_for_forced_make", 0x16FC, _pack_u16_pair(10000, 10000)),
+    ("min_timing_error_pct_for_forced_miss", 0x1704, _pack_u16_pair(10000, 10000)),
+    ("forced_shot_result_max_variance", 0x170C, bytes(4)),
+    ("min_shot_chance_for_forced_make", 0x1714, bytes(4)),
+    ("max_shot_chance_for_forced_miss", 0x171C, bytes(4)),
 )
 SHOT_RUNTIME_TEAM_BLOCK_OFFSET = 0x110
 SHOT_RUNTIME_TEAM_BLOCK_SIZE = 0x7A0

@@ -7,6 +7,8 @@ import ctypes
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt
 
+_single_instance_mutex = None
+
 
 def is_admin() -> bool:
     """检查是否以管理员权限运行"""
@@ -28,6 +30,23 @@ def relaunch_as_admin():
     ctypes.windll.shell32.ShellExecuteW(
         None, "runas", exe, args, os.getcwd(), 1
     )
+
+
+def acquire_single_instance_mutex() -> bool:
+    """Prevent multiple trainer processes from racing over live memory patches."""
+    global _single_instance_mutex
+
+    kernel32 = ctypes.windll.kernel32
+    _single_instance_mutex = kernel32.CreateMutexW(
+        None,
+        False,
+        "Global\\NBA2K26Trainer.SingleInstance",
+    )
+    if not _single_instance_mutex:
+        return True
+
+    ERROR_ALREADY_EXISTS = 183
+    return kernel32.GetLastError() != ERROR_ALREADY_EXISTS
 
 
 def main():
@@ -54,6 +73,15 @@ def main():
             relaunch_as_admin()
             sys.exit(0)
         # 用户选 No，继续运行但可能连接失败
+
+    if not acquire_single_instance_mutex():
+        QMessageBox.warning(
+            None,
+            "NBA 2K26 Trainer",
+            "Another trainer instance is already running.\n\n"
+            "Close the other window first so live memory patches do not conflict.",
+        )
+        sys.exit(0)
 
     from nba2k26_trainer.ui.main_window import MainWindow
     window = MainWindow()
