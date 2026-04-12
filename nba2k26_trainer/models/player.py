@@ -316,11 +316,29 @@ SHOT_RUNTIME_COVERAGE_DELTA_OFFSET = 0x15B0
 SHOT_RUNTIME_IMPACT_DELTA_OFFSET = 0x23C0
 SHOT_RUNTIME_TIMING_DELTA_SIZE = 0x20
 SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE = SHOT_RUNTIME_TIMING_DELTA_SIZE
+
+
+def _pack_u16_pair(first: int, second: int) -> bytes:
+    return struct.pack("<HH", first & 0xFFFF, second & 0xFFFF)
+
+
 SHOT_RUNTIME_PERFECT_PATCHES: Tuple[Tuple[str, int, bytes], ...] = (
     ("ai_team_delta", SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
     ("human_team_delta", SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
     ("coverage_delta", SHOT_RUNTIME_COVERAGE_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
     ("impact_delta", SHOT_RUNTIME_IMPACT_DELTA_OFFSET, bytes(SHOT_RUNTIME_TIMING_DELTA_SIZE)),
+    ("three_point_height_mod", 0x15EC, bytes(4)),
+    ("shot_chance_penalty_after_fake", 0x15F4, bytes(4)),
+    ("very_easy_shot_threshold", 0x15FC, bytes(4)),
+    ("min_chance_excellent", 0x15D4, bytes(4)),
+    ("max_defense_excellent_shots", 0x15DC, _pack_u16_pair(10000, 10000)),
+    ("max_defense_excellent_layups", 0x15E4, _pack_u16_pair(10000, 10000)),
+    ("timing_variability_high_defense", 0x1604, bytes(4)),
+    ("timing_variability_great_shooter", 0x160C, bytes(4)),
+    ("timing_variability_good_shooter", 0x1614, bytes(4)),
+    ("timing_variability_bad_shooter", 0x161C, bytes(4)),
+    ("ai_timing_variance_standard", 0x1624, bytes(4)),
+    ("ai_timing_variance_reduced", 0x162C, bytes(4)),
 )
 SHOT_RUNTIME_TEAM_BLOCK_OFFSET = 0x110
 SHOT_RUNTIME_TEAM_BLOCK_SIZE = 0x7A0

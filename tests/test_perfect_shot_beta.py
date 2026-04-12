@@ -19,6 +19,7 @@ from nba2k26_trainer.models.player import (
     SHOT_RUNTIME_ENTRY_COUNT_OFFSET,
     SHOT_RUNTIME_GLOBAL_PTR_SLOT,
     SHOT_RUNTIME_IMPACT_DELTA_OFFSET,
+    SHOT_RUNTIME_PERFECT_PATCHES,
     PlayerManager,
     Player,
 )
@@ -175,6 +176,31 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.original_ai_delta = original_ai_delta
         self.original_coverage_delta = original_coverage_delta
         self.original_impact_delta = original_impact_delta
+        self.runtime_patch_originals = {}
+        for patch_index, (name, offset, patch_bytes) in enumerate(SHOT_RUNTIME_PERFECT_PATCHES, start=1):
+            if offset == SHOT_RUNTIME_AI_TEAM_DELTA_OFFSET:
+                self.runtime_patch_originals[name] = self.original_ai_team_delta
+                continue
+            if offset == SHOT_RUNTIME_AI_HUMAN_DELTA_OFFSET:
+                self.runtime_patch_originals[name] = self.original_ai_delta
+                continue
+            if offset == SHOT_RUNTIME_COVERAGE_DELTA_OFFSET:
+                self.runtime_patch_originals[name] = self.original_coverage_delta
+                continue
+            if offset == SHOT_RUNTIME_IMPACT_DELTA_OFFSET:
+                self.runtime_patch_originals[name] = self.original_impact_delta
+                continue
+            original = bytes(
+                ((patch_index * 11) + value_index) % 256
+                for value_index in range(len(patch_bytes))
+            )
+            if original == patch_bytes:
+                original = bytes(
+                    (((patch_index + 7) * 13) + value_index) % 256
+                    for value_index in range(len(patch_bytes))
+                )
+            self.mem.write_bytes_at(self.runtime_entry + offset, original)
+            self.runtime_patch_originals[name] = original
 
         self.mem.write_uint64(self.mem.base_address + PERFECT_SHOT_MANAGER_SLOT_OFFSET, self.manager_base)
         self.mem.write_uint32(self.manager_base + PERFECT_SHOT_ENTRY_COUNT_OFFSET, 1)
@@ -230,6 +256,11 @@ class PerfectShotBetaTests(unittest.TestCase):
             ),
             bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
         )
+        for name, offset, patch_bytes in SHOT_RUNTIME_PERFECT_PATCHES:
+            self.assertEqual(
+                self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
+                patch_bytes,
+            )
         self.assertEqual(self.mem.read_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET), 0)
         self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET), 0)
         self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET), 0)
@@ -305,6 +336,11 @@ class PerfectShotBetaTests(unittest.TestCase):
             ),
             bytes(SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
         )
+        for name, offset, patch_bytes in SHOT_RUNTIME_PERFECT_PATCHES:
+            self.assertEqual(
+                self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
+                patch_bytes,
+            )
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             self.assertEqual(
                 self.mem.read_bytes(self.legacy_entry + offset, len(patch_bytes)),
@@ -350,6 +386,11 @@ class PerfectShotBetaTests(unittest.TestCase):
             ),
             self.original_impact_delta,
         )
+        for name, offset, patch_bytes in SHOT_RUNTIME_PERFECT_PATCHES:
+            self.assertEqual(
+                self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
+                self.runtime_patch_originals[name],
+            )
         for offset, original in self.legacy_patch_originals.items():
             self.assertEqual(
                 self.mem.read_bytes(self.legacy_entry + offset, len(original)),

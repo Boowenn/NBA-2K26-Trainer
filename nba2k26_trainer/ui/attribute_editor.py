@@ -449,6 +449,7 @@ class AttributeEditorWidget(QWidget):
             f" Human-team={'yes' if summary.get('human_team_delta_written') else 'no'}"
             f" Coverage={'yes' if summary.get('coverage_delta_written') else 'no'}"
             f" Impact={'yes' if summary.get('impact_delta_written') else 'no'}",
+            f"Shot tuning patches applied: {summary.get('runtime_patch_writes', 0)}",
             f"Legacy global lock cleared: {'yes' if summary.get('legacy_cleared') else 'no'}",
             f"Live match players boosted: {summary.get('match_boost_players', 0)}",
             f"Live match entries boosted: {summary.get('match_boost_entries', 0)}",
