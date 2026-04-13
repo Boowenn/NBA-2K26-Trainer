@@ -306,10 +306,50 @@ PERFECT_SHOT_MATCH_PROFILE_VALUES: Dict[str, int] = {
     "Attack Strong": 99,
 }
 PERFECT_SHOT_ROSTER_PROFILE_VALUES: Dict[str, int] = dict(PERFECT_SHOT_CORE_PROFILE_VALUES)
+PERFECT_SHOT_OPPONENT_CORE_PROFILE_VALUES: Dict[str, int] = {
+    "Close Shot": 25,
+    "Mid-Range Shot": 25,
+    "Three-Point Shot": 25,
+    "Free Throw": 25,
+    "Driving Layup": 25,
+    "Shot IQ": 25,
+    "Offensive Consistency": 25,
+    "Shot Under Basket": 25,
+    "Shot Close": 25,
+    "Shot Mid": 25,
+    "Shot 3pt": 25,
+    "Contested 3pt": 0,
+    "Contested Mid": 0,
+    "Drive Pull Up Mid": 20,
+    "Driving Layup Tendency": 10,
+    "Contest Shot": 0,
+    "Deadeye": 0,
+    "Limitless Range": 0,
+    "Mini Marksman": 0,
+    "Shifty Shooter": 0,
+    "Layup Mix Master": 0,
+}
+PERFECT_SHOT_OPPONENT_MATCH_PROFILE_VALUES: Dict[str, int] = {
+    **PERFECT_SHOT_OPPONENT_CORE_PROFILE_VALUES,
+    "Float Game": 0,
+    "Paint Prodigy": 0,
+    "Physical Finisher": 0,
+    "Posterizer": 0,
+    "Rise Up": 0,
+    "Off Screen 3pt": 10,
+    "Stepback 3pt": 10,
+    "Drive Pull Up 3pt": 10,
+    "Transition Pull Up 3pt": 10,
+    "Drive": 10,
+    "Spot Up Drive": 10,
+    "Attack Strong": 10,
+}
+PERFECT_SHOT_OPPONENT_ROSTER_PROFILE_VALUES: Dict[str, int] = dict(PERFECT_SHOT_OPPONENT_CORE_PROFILE_VALUES)
 PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL = 25
-# These runtime/legacy patch groups are shared across the live shot container.
-# Keep them disabled until we can reliably scope them to the selected team.
-PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED = False
+# Shared runtime shot-result patches are global for the live game.
+# Pair them with a temporary live-opponent debuff so the selected MyGM team
+# gets the strongest benefit while the opposing AI is dampened and restored on stop.
+PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED = True
 PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED = False
 
 PERFECT_SHOT_MANAGER_SLOT_OFFSET = 0x789A170
@@ -531,6 +571,8 @@ class PlayerManager:
         self._match_compact_entry_cache: Dict[int, List[int]] = {}
         self._perfect_shot_match_attr_cache: Optional[List[Tuple[AttributeDef, int]]] = None
         self._perfect_shot_roster_attr_cache: Optional[List[Tuple[AttributeDef, int]]] = None
+        self._perfect_shot_opponent_match_attr_cache: Optional[List[Tuple[AttributeDef, int]]] = None
+        self._perfect_shot_opponent_roster_attr_cache: Optional[List[Tuple[AttributeDef, int]]] = None
         self._perfect_shot_beta_state: Optional[Dict[str, Any]] = None
         self._shot_runtime_team_block_cache: Dict[Tuple[int, int], Optional[int]] = {}
         self._rejected_table_bases: set[int] = set()
@@ -2319,30 +2361,56 @@ class PlayerManager:
         if self._perfect_shot_match_attr_cache is not None:
             return self._perfect_shot_match_attr_cache
 
-        attrs: List[Tuple[AttributeDef, int]] = []
-        for description, target_value in PERFECT_SHOT_MATCH_PROFILE_VALUES.items():
-            attr = self.config.find_attribute_by_description(description)
-            if attr is None:
-                continue
-            if self._map_match_compact_offset(attr.offset) is None:
-                continue
-            attrs.append((attr, self._coerce_attribute_value(attr, target_value)))
-
-        self._perfect_shot_match_attr_cache = attrs
-        return attrs
+        self._perfect_shot_match_attr_cache = self._build_profile_attr_list(
+            PERFECT_SHOT_MATCH_PROFILE_VALUES,
+            require_match_compact=True,
+        )
+        return self._perfect_shot_match_attr_cache
 
     def _get_perfect_shot_roster_attrs(self) -> List[Tuple[AttributeDef, int]]:
         if self._perfect_shot_roster_attr_cache is not None:
             return self._perfect_shot_roster_attr_cache
 
+        self._perfect_shot_roster_attr_cache = self._build_profile_attr_list(
+            PERFECT_SHOT_ROSTER_PROFILE_VALUES,
+            require_match_compact=False,
+        )
+        return self._perfect_shot_roster_attr_cache
+
+    def _get_perfect_shot_opponent_match_attrs(self) -> List[Tuple[AttributeDef, int]]:
+        if self._perfect_shot_opponent_match_attr_cache is not None:
+            return self._perfect_shot_opponent_match_attr_cache
+
+        self._perfect_shot_opponent_match_attr_cache = self._build_profile_attr_list(
+            PERFECT_SHOT_OPPONENT_MATCH_PROFILE_VALUES,
+            require_match_compact=True,
+        )
+        return self._perfect_shot_opponent_match_attr_cache
+
+    def _get_perfect_shot_opponent_roster_attrs(self) -> List[Tuple[AttributeDef, int]]:
+        if self._perfect_shot_opponent_roster_attr_cache is not None:
+            return self._perfect_shot_opponent_roster_attr_cache
+
+        self._perfect_shot_opponent_roster_attr_cache = self._build_profile_attr_list(
+            PERFECT_SHOT_OPPONENT_ROSTER_PROFILE_VALUES,
+            require_match_compact=False,
+        )
+        return self._perfect_shot_opponent_roster_attr_cache
+
+    def _build_profile_attr_list(
+        self,
+        profile_values: Dict[str, int],
+        *,
+        require_match_compact: bool,
+    ) -> List[Tuple[AttributeDef, int]]:
         attrs: List[Tuple[AttributeDef, int]] = []
-        for description, target_value in PERFECT_SHOT_ROSTER_PROFILE_VALUES.items():
+        for description, target_value in profile_values.items():
             attr = self.config.find_attribute_by_description(description)
             if attr is None:
                 continue
+            if require_match_compact and self._map_match_compact_offset(attr.offset) is None:
+                continue
             attrs.append((attr, self._coerce_attribute_value(attr, target_value)))
-
-        self._perfect_shot_roster_attr_cache = attrs
         return attrs
 
     def _iter_team_players(self, team_id: int, team_name: Optional[str]) -> List[Player]:
@@ -2362,13 +2430,13 @@ class PlayerManager:
         for candidate in self._iter_team_players(team_id, team_name):
             self._match_compact_entry_cache.pop(candidate.record_address, None)
 
-    def _apply_perfect_shot_roster_boosts(
+    def _apply_team_roster_profile(
         self,
         team_id: int,
         team_name: Optional[str],
+        attrs: List[Tuple[AttributeDef, int]],
         originals: Dict[Tuple[int, str], Any],
     ) -> Dict[str, int]:
-        attrs = self._get_perfect_shot_roster_attrs()
         if not attrs:
             return {
                 "roster_boost_players": 0,
@@ -2394,6 +2462,19 @@ class PlayerManager:
             "roster_boost_writes": boosted_writes,
         }
 
+    def _apply_perfect_shot_roster_boosts(
+        self,
+        team_id: int,
+        team_name: Optional[str],
+        originals: Dict[Tuple[int, str], Any],
+    ) -> Dict[str, int]:
+        return self._apply_team_roster_profile(
+            team_id,
+            team_name,
+            self._get_perfect_shot_roster_attrs(),
+            originals,
+        )
+
     def _restore_perfect_shot_roster_boosts(self, originals: Dict[Tuple[int, str], Any]) -> int:
         restored_writes = 0
         player_map = {int(player.record_address): player for player in self.players}
@@ -2418,7 +2499,20 @@ class PlayerManager:
         team_name: Optional[str],
         originals: Dict[Tuple[int, str], Any],
     ) -> Dict[str, int]:
-        attrs = self._get_perfect_shot_match_attrs()
+        return self._apply_team_match_profile(
+            team_id,
+            team_name,
+            self._get_perfect_shot_match_attrs(),
+            originals,
+        )
+
+    def _apply_team_match_profile(
+        self,
+        team_id: int,
+        team_name: Optional[str],
+        attrs: List[Tuple[AttributeDef, int]],
+        originals: Dict[Tuple[int, str], Any],
+    ) -> Dict[str, int]:
         if not attrs:
             return {
                 "match_boost_players": 0,
@@ -2455,6 +2549,126 @@ class PlayerManager:
             "match_boost_entries": len(seen_entries),
             "match_boost_writes": boosted_writes,
         }
+
+    def _apply_perfect_shot_opponent_roster_debuffs(
+        self,
+        team_id: int,
+        team_name: Optional[str],
+        originals: Dict[Tuple[int, str], Any],
+    ) -> Dict[str, int]:
+        return self._apply_team_roster_profile(
+            team_id,
+            team_name,
+            self._get_perfect_shot_opponent_roster_attrs(),
+            originals,
+        )
+
+    def _apply_perfect_shot_opponent_match_debuffs(
+        self,
+        team_id: int,
+        team_name: Optional[str],
+        originals: Dict[Tuple[int, str], Any],
+    ) -> Dict[str, int]:
+        return self._apply_team_match_profile(
+            team_id,
+            team_name,
+            self._get_perfect_shot_opponent_match_attrs(),
+            originals,
+        )
+
+    def _resolve_live_match_opponent_team(
+        self,
+        representative_player: Player,
+        team_id: int,
+        team_name: Optional[str],
+    ) -> Optional[Tuple[int, str]]:
+        if not self.players:
+            self.scan_players()
+
+        normalized_target_name = _normalize_text(team_name).lower()
+        representative_regions = list(self._discover_match_compact_regions(representative_player))
+        if not representative_regions:
+            return self._resolve_live_match_opponent_team_fallback(team_id, team_name)
+
+        region_blobs: List[bytes] = []
+        for region_base, region_size, _, _ in representative_regions:
+            data = self.mem.read_bytes(region_base, region_size)
+            if data:
+                region_blobs.append(data)
+        if not region_blobs:
+            return self._resolve_live_match_opponent_team_fallback(team_id, team_name)
+
+        team_counts: Dict[Tuple[int, str], int] = {}
+
+        for candidate in self.players:
+            candidate_team_name = candidate.team_name or ""
+            normalized_candidate_name = _normalize_text(candidate_team_name).lower()
+            is_target_team = candidate.team_id == team_id
+            if normalized_target_name and normalized_candidate_name == normalized_target_name:
+                is_target_team = True
+            if is_target_team:
+                continue
+
+            handle = self._get_match_compact_handle(candidate)
+            if not handle:
+                continue
+            if not any(data.find(handle) != -1 for data in region_blobs):
+                continue
+
+            key = (candidate.team_id, normalized_candidate_name or f"id:{candidate.team_id}")
+            team_counts[key] = team_counts.get(key, 0) + 1
+            if team_counts[key] >= 8:
+                return candidate.team_id, candidate.team_name or "Unknown"
+
+        if not team_counts:
+            return None
+
+        best_team_id, best_team_key = max(team_counts, key=team_counts.get)
+        best_team_name = best_team_key
+        for candidate in self.players:
+            normalized_candidate_name = _normalize_text(candidate.team_name).lower()
+            if candidate.team_id == best_team_id:
+                return best_team_id, candidate.team_name or best_team_name or "Unknown"
+            if best_team_key and normalized_candidate_name == best_team_key:
+                return candidate.team_id, candidate.team_name or best_team_name or "Unknown"
+        return best_team_id, best_team_name or "Unknown"
+
+    def _resolve_live_match_opponent_team_fallback(
+        self,
+        team_id: int,
+        team_name: Optional[str],
+    ) -> Optional[Tuple[int, str]]:
+        normalized_target_name = _normalize_text(team_name).lower()
+        team_counts: Dict[Tuple[int, str], int] = {}
+
+        for candidate in self.players:
+            candidate_team_name = candidate.team_name or ""
+            normalized_candidate_name = _normalize_text(candidate_team_name).lower()
+            is_target_team = candidate.team_id == team_id
+            if normalized_target_name and normalized_candidate_name == normalized_target_name:
+                is_target_team = True
+            if is_target_team:
+                continue
+            if not self._get_match_compact_entry_bases(candidate):
+                continue
+
+            key = (candidate.team_id, normalized_candidate_name or f"id:{candidate.team_id}")
+            team_counts[key] = team_counts.get(key, 0) + 1
+            if team_counts[key] >= 4:
+                return candidate.team_id, candidate.team_name or "Unknown"
+
+        if not team_counts:
+            return None
+
+        best_team_id, best_team_key = max(team_counts, key=team_counts.get)
+        best_team_name = best_team_key
+        for candidate in self.players:
+            normalized_candidate_name = _normalize_text(candidate.team_name).lower()
+            if candidate.team_id == best_team_id:
+                return best_team_id, candidate.team_name or best_team_name or "Unknown"
+            if best_team_key and normalized_candidate_name == best_team_key:
+                return candidate.team_id, candidate.team_name or best_team_name or "Unknown"
+        return best_team_id, best_team_name or "Unknown"
 
     def _restore_perfect_shot_match_boosts(self, originals: Dict[Tuple[int, str], Any]) -> int:
         restored_writes = 0
@@ -3082,6 +3296,36 @@ class PlayerManager:
             target_team_name,
             roster_originals,
         )
+        opponent_team = self._resolve_live_match_opponent_team(
+            target_player,
+            resolved_team_id,
+            target_team_name,
+        )
+        opponent_team_id: Optional[int] = None
+        opponent_team_name: Optional[str] = None
+        opponent_roster_originals: Dict[Tuple[int, str], Any] = {}
+        opponent_match_originals: Dict[Tuple[int, str], Any] = {}
+        opponent_roster_summary = {
+            "roster_boost_players": 0,
+            "roster_boost_writes": 0,
+        }
+        opponent_match_summary = {
+            "match_boost_players": 0,
+            "match_boost_entries": 0,
+            "match_boost_writes": 0,
+        }
+        if opponent_team is not None:
+            opponent_team_id, opponent_team_name = opponent_team
+            opponent_match_summary = self._apply_perfect_shot_opponent_match_debuffs(
+                opponent_team_id,
+                opponent_team_name,
+                opponent_match_originals,
+            )
+            opponent_roster_summary = self._apply_perfect_shot_opponent_roster_debuffs(
+                opponent_team_id,
+                opponent_team_name,
+                opponent_roster_originals,
+            )
 
         self._perfect_shot_beta_state = {
             "entry_base": entry_base,
@@ -3098,10 +3342,19 @@ class PlayerManager:
             "roster_originals": roster_originals,
             "roster_boost_players": roster_boost_summary["roster_boost_players"],
             "roster_boost_writes": roster_boost_summary["roster_boost_writes"],
+            "opponent_team_id": opponent_team_id,
+            "opponent_team_name": opponent_team_name,
+            "opponent_roster_originals": opponent_roster_originals,
+            "opponent_roster_boost_players": opponent_roster_summary["roster_boost_players"],
+            "opponent_roster_boost_writes": opponent_roster_summary["roster_boost_writes"],
             "match_copy_originals": match_copy_originals,
             "match_boost_players": match_boost_summary["match_boost_players"],
             "match_boost_entries": match_boost_summary["match_boost_entries"],
             "match_boost_writes": match_boost_summary["match_boost_writes"],
+            "opponent_match_originals": opponent_match_originals,
+            "opponent_match_boost_players": opponent_match_summary["match_boost_players"],
+            "opponent_match_boost_entries": opponent_match_summary["match_boost_entries"],
+            "opponent_match_boost_writes": opponent_match_summary["match_boost_writes"],
             "shared_runtime_patches_enabled": PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED,
             "shared_legacy_patches_enabled": PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED,
         }
@@ -3124,10 +3377,16 @@ class PlayerManager:
             "legacy_state_writes": legacy_state_writes,
             "roster_boost_players": roster_boost_summary["roster_boost_players"],
             "roster_boost_writes": roster_boost_summary["roster_boost_writes"],
+            "opponent_team_name": opponent_team_name,
+            "opponent_roster_boost_players": opponent_roster_summary["roster_boost_players"],
+            "opponent_roster_boost_writes": opponent_roster_summary["roster_boost_writes"],
             "representative_player": target_player.full_name,
             "match_boost_players": match_boost_summary["match_boost_players"],
             "match_boost_entries": match_boost_summary["match_boost_entries"],
             "match_boost_writes": match_boost_summary["match_boost_writes"],
+            "opponent_match_boost_players": opponent_match_summary["match_boost_players"],
+            "opponent_match_boost_entries": opponent_match_summary["match_boost_entries"],
+            "opponent_match_boost_writes": opponent_match_summary["match_boost_writes"],
         }
 
     def refresh_perfect_shot_beta(self) -> Dict[str, Any]:
@@ -3137,7 +3396,7 @@ class PlayerManager:
 
         is_live, _, reason = self._validate_perfect_shot_context(state)
         if not is_live:
-            stop_summary = self.stop_perfect_shot_beta(restore_live_memory=False, reason=reason)
+            stop_summary = self.stop_perfect_shot_beta(restore_live_memory=True, reason=reason)
             stop_summary["auto_stopped"] = True
             return stop_summary
 
@@ -3179,6 +3438,34 @@ class PlayerManager:
         state["match_boost_entries"] = match_boost_summary["match_boost_entries"]
         state["match_boost_writes"] = match_boost_summary["match_boost_writes"]
 
+        opponent_roster_summary = {
+            "roster_boost_players": 0,
+            "roster_boost_writes": 0,
+        }
+        opponent_match_summary = {
+            "match_boost_players": 0,
+            "match_boost_entries": 0,
+            "match_boost_writes": 0,
+        }
+        opponent_team_id = state.get("opponent_team_id")
+        opponent_team_name = state.get("opponent_team_name")
+        if opponent_team_id is not None or opponent_team_name:
+            opponent_roster_summary = self._apply_perfect_shot_opponent_roster_debuffs(
+                int(opponent_team_id) if opponent_team_id is not None else UNKNOWN_TEAM_ID,
+                opponent_team_name,
+                state["opponent_roster_originals"],
+            )
+            opponent_match_summary = self._apply_perfect_shot_opponent_match_debuffs(
+                int(opponent_team_id) if opponent_team_id is not None else UNKNOWN_TEAM_ID,
+                opponent_team_name,
+                state["opponent_match_originals"],
+            )
+        state["opponent_roster_boost_players"] = opponent_roster_summary["roster_boost_players"]
+        state["opponent_roster_boost_writes"] = opponent_roster_summary["roster_boost_writes"]
+        state["opponent_match_boost_players"] = opponent_match_summary["match_boost_players"]
+        state["opponent_match_boost_entries"] = opponent_match_summary["match_boost_entries"]
+        state["opponent_match_boost_writes"] = opponent_match_summary["match_boost_writes"]
+
         return {
             "active": True,
             "entry_base": hex(int(state["entry_base"])),
@@ -3195,9 +3482,15 @@ class PlayerManager:
             "legacy_state_writes": legacy_state_writes,
             "roster_boost_players": roster_boost_summary["roster_boost_players"],
             "roster_boost_writes": roster_boost_summary["roster_boost_writes"],
+            "opponent_team_name": state.get("opponent_team_name"),
+            "opponent_roster_boost_players": opponent_roster_summary["roster_boost_players"],
+            "opponent_roster_boost_writes": opponent_roster_summary["roster_boost_writes"],
             "match_boost_players": match_boost_summary["match_boost_players"],
             "match_boost_entries": match_boost_summary["match_boost_entries"],
             "match_boost_writes": match_boost_summary["match_boost_writes"],
+            "opponent_match_boost_players": opponent_match_summary["match_boost_players"],
+            "opponent_match_boost_entries": opponent_match_summary["match_boost_entries"],
+            "opponent_match_boost_writes": opponent_match_summary["match_boost_writes"],
         }
 
     def stop_perfect_shot_beta(
@@ -3217,7 +3510,7 @@ class PlayerManager:
         legacy_cleared = False
 
         if restore_live_memory:
-            if state.get("shared_runtime_patches_enabled"):
+            if state.get("shared_runtime_patches_enabled") and int(state.get("entry_base") or 0) in self._resolve_shot_runtime_entry_bases():
                 restored_runtime_writes = self._restore_runtime_perfect_shot_patches(
                     state.get("runtime_patch_originals", {})
                 )
@@ -3226,6 +3519,12 @@ class PlayerManager:
             )
             restored_match_writes = self._restore_perfect_shot_match_boosts(
                 state.get("match_copy_originals", {})
+            )
+            restored_roster_writes += self._restore_perfect_shot_roster_boosts(
+                state.get("opponent_roster_originals", {})
+            )
+            restored_match_writes += self._restore_perfect_shot_match_boosts(
+                state.get("opponent_match_originals", {})
             )
             if state.get("shared_legacy_patches_enabled"):
                 restored_legacy_state_writes = self._restore_legacy_perfect_shot_patches(
@@ -3244,6 +3543,7 @@ class PlayerManager:
             "restored_legacy_state_writes": restored_legacy_state_writes,
             "legacy_cleared": legacy_cleared,
             "target_team_name": team_name,
+            "opponent_team_name": state.get("opponent_team_name"),
             "restore_skipped": not restore_live_memory,
         }
         if reason:
@@ -3310,6 +3610,12 @@ class PlayerManager:
             "human_team_delta_written": bool(state.get("human_team_delta")),
             "coverage_delta_written": bool(state.get("coverage_delta")),
             "impact_delta_written": bool(state.get("impact_delta")),
+            "opponent_team_name": state.get("opponent_team_name"),
+            "opponent_roster_boost_players": state.get("opponent_roster_boost_players", 0),
+            "opponent_roster_boost_writes": state.get("opponent_roster_boost_writes", 0),
+            "opponent_match_boost_players": state.get("opponent_match_boost_players", 0),
+            "opponent_match_boost_entries": state.get("opponent_match_boost_entries", 0),
+            "opponent_match_boost_writes": state.get("opponent_match_boost_writes", 0),
             "legacy_state_writes": state.get("legacy_state_writes", 0),
             "legacy_manager_base": hex(legacy_manager_base) if legacy_manager_base is not None else None,
             "legacy_entries": legacy_entries,

@@ -450,12 +450,15 @@ class AttributeEditorWidget(QWidget):
             f" Coverage={'yes' if summary.get('coverage_delta_written') else 'no'}"
             f" Impact={'yes' if summary.get('impact_delta_written') else 'no'}",
             f"Shot tuning patches applied: {summary.get('runtime_patch_writes', 0)}",
-            "Shared runtime shot patches stay disabled until they can be scoped to one team safely.",
+            "Shared runtime shot-result patches are active for this live game.",
             f"Legacy global lock cleared: {'yes' if summary.get('legacy_cleared') else 'no'}",
             f"Temporary roster shooting boosts: {summary.get('roster_boost_players', 0)} players / {summary.get('roster_boost_writes', 0)} writes",
             f"Live match players boosted: {summary.get('match_boost_players', 0)}",
             f"Live match entries boosted: {summary.get('match_boost_entries', 0)}",
             f"Live match writes applied: {summary.get('match_boost_writes', 0)}",
+            f"Opponent dampening team: {summary.get('opponent_team_name') or 'not resolved'}",
+            f"Opponent roster dampening: {summary.get('opponent_roster_boost_players', 0)} players / {summary.get('opponent_roster_boost_writes', 0)} writes",
+            f"Opponent live match dampening: {summary.get('opponent_match_boost_players', 0)} players / {summary.get('opponent_match_boost_entries', 0)} entries / {summary.get('opponent_match_boost_writes', 0)} writes",
             "All temporary Lock Green boosts are restored when you stop the toggle.",
         ]
         QMessageBox.information(self, "Lock Green Beta Enabled", "\n".join(lines))
