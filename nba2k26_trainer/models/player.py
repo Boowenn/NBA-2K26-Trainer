@@ -350,7 +350,7 @@ PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL = 25
 # Pair them with a temporary live-opponent debuff so the selected MyGM team
 # gets the strongest benefit while the opposing AI is dampened and restored on stop.
 PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED = True
-PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED = False
+PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED = True
 
 PERFECT_SHOT_MANAGER_SLOT_OFFSET = 0x789A170
 PERFECT_SHOT_ENTRY_COUNT_OFFSET = 0x17F8
@@ -362,6 +362,11 @@ PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET = 0x364
 PERFECT_SHOT_FORCED_ENABLE_VALUE = 1
 PERFECT_SHOT_FORCED_LOCK_VALUE = 0x7FFFFFFF
 PERFECT_SHOT_MAX_ENTRY_COUNT = 8
+PERFECT_SHOT_LEGACY_CONTROL_PATCHES: Tuple[Tuple[int, bytes], ...] = (
+    (PERFECT_SHOT_ENABLE_OFFSET, bytes([PERFECT_SHOT_FORCED_ENABLE_VALUE])),
+    (PERFECT_SHOT_LOCK_TIMER_OFFSET, struct.pack("<I", PERFECT_SHOT_FORCED_LOCK_VALUE)),
+    (PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET, struct.pack("<I", PERFECT_SHOT_FORCED_LOCK_VALUE)),
+)
 PERFECT_SHOT_LEGACY_STATE_PATCHES: Tuple[Tuple[int, bytes], ...] = (
     (0x452, b"\x01\x01"),
     (0xBF2, b"\x01\x01"),
@@ -3144,6 +3149,9 @@ class PlayerManager:
             cleared = self.mem.write_uint32(entry_base + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET, 0) or cleared
         return cleared
 
+    def _iter_legacy_perfect_shot_patches(self) -> Tuple[Tuple[int, bytes], ...]:
+        return PERFECT_SHOT_LEGACY_CONTROL_PATCHES + PERFECT_SHOT_LEGACY_STATE_PATCHES
+
     def _capture_runtime_perfect_shot_patches(self, entry_base: int) -> Dict[str, Dict[str, Any]]:
         originals: Dict[str, Dict[str, Any]] = {}
         for name, offset, patch_bytes in SHOT_RUNTIME_PERFECT_PATCHES:
@@ -3190,7 +3198,7 @@ class PlayerManager:
     def _capture_legacy_perfect_shot_patches(self) -> Dict[Tuple[int, int], bytes]:
         originals: Dict[Tuple[int, int], bytes] = {}
         for entry_base in self._get_perfect_shot_beta_entry_bases():
-            for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
+            for offset, patch_bytes in self._iter_legacy_perfect_shot_patches():
                 original_bytes = self.mem.read_bytes(entry_base + offset, len(patch_bytes))
                 if not original_bytes or len(original_bytes) != len(patch_bytes):
                     continue
@@ -3203,12 +3211,15 @@ class PlayerManager:
             patch_bytes = next(
                 (
                     candidate
-                    for candidate_offset, candidate in PERFECT_SHOT_LEGACY_STATE_PATCHES
+                    for candidate_offset, candidate in self._iter_legacy_perfect_shot_patches()
                     if candidate_offset == offset
                 ),
                 None,
             )
-            if patch_bytes is None or original_bytes == patch_bytes:
+            if patch_bytes is None:
+                continue
+            current_bytes = self.mem.read_bytes(entry_base + offset, len(patch_bytes)) or b""
+            if current_bytes == patch_bytes:
                 continue
             if self.mem.write_bytes(entry_base + offset, patch_bytes):
                 writes += 1
@@ -3278,12 +3289,12 @@ class PlayerManager:
                 }
             runtime_patch_summary = self._apply_runtime_perfect_shot_patches(runtime_patch_originals)
         runtime_applied = runtime_patch_summary.get("applied", {})
-        legacy_cleared = self._clear_legacy_perfect_shot_state()
+        legacy_cleared = False
         legacy_state_originals: Dict[Tuple[int, int], bytes] = {}
-        legacy_state_writes = 0
         if PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED:
             legacy_state_originals = self._capture_legacy_perfect_shot_patches()
-            legacy_state_writes = self._apply_legacy_perfect_shot_patches(legacy_state_originals)
+        else:
+            legacy_cleared = self._clear_legacy_perfect_shot_state()
         match_copy_originals: Dict[Tuple[int, str], Any] = {}
         match_boost_summary = self._apply_perfect_shot_match_boosts(
             resolved_team_id,
@@ -3326,6 +3337,9 @@ class PlayerManager:
                 opponent_team_name,
                 opponent_roster_originals,
             )
+        legacy_state_writes = 0
+        if PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED:
+            legacy_state_writes = self._apply_legacy_perfect_shot_patches(legacy_state_originals)
 
         self._perfect_shot_beta_state = {
             "entry_base": entry_base,
@@ -3409,14 +3423,8 @@ class PlayerManager:
                 state.get("runtime_patch_originals", {})
             )
         runtime_applied = runtime_patch_summary.get("applied", {})
-        legacy_state_writes = 0
-        if state.get("shared_legacy_patches_enabled"):
-            legacy_state_writes = self._apply_legacy_perfect_shot_patches(
-                state.get("legacy_state_originals", {})
-            )
         state.update(runtime_applied)
         state["runtime_patch_writes"] = int(runtime_patch_summary["writes"])
-        state["legacy_state_writes"] = legacy_state_writes
         state["refresh_counter"] = int(state.get("refresh_counter", 0)) + 1
         if state["refresh_counter"] % PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL == 0:
             self._clear_match_compact_cache_for_team(int(state["team_id"]), state["team_name"])
@@ -3460,6 +3468,12 @@ class PlayerManager:
                 opponent_team_name,
                 state["opponent_match_originals"],
             )
+        legacy_state_writes = 0
+        if state.get("shared_legacy_patches_enabled"):
+            legacy_state_writes = self._apply_legacy_perfect_shot_patches(
+                state.get("legacy_state_originals", {})
+            )
+        state["legacy_state_writes"] = legacy_state_writes
         state["opponent_roster_boost_players"] = opponent_roster_summary["roster_boost_players"]
         state["opponent_roster_boost_writes"] = opponent_roster_summary["roster_boost_writes"]
         state["opponent_match_boost_players"] = opponent_match_summary["match_boost_players"]
@@ -3530,7 +3544,8 @@ class PlayerManager:
                 restored_legacy_state_writes = self._restore_legacy_perfect_shot_patches(
                     state.get("legacy_state_originals", {})
                 )
-            legacy_cleared = self._clear_legacy_perfect_shot_state()
+            else:
+                legacy_cleared = self._clear_legacy_perfect_shot_state()
 
         team_name = state.get("team_name", "Unknown")
         self._perfect_shot_beta_state = None

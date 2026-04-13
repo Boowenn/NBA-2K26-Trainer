@@ -3,6 +3,9 @@ from pathlib import Path
 
 from nba2k26_trainer.core.offsets import initialize_offsets
 from nba2k26_trainer.models.player import (
+    PERFECT_SHOT_FORCED_ENABLE_VALUE,
+    PERFECT_SHOT_FORCED_LOCK_VALUE,
+    PERFECT_SHOT_LEGACY_CONTROL_PATCHES,
     PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED,
     PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED,
     PERFECT_SHOT_ENTRY_COUNT_OFFSET,
@@ -212,6 +215,9 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.mem.write_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET, 1)
         self.mem.write_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET, 123)
         self.mem.write_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET, 456)
+        self.legacy_control_originals = {}
+        for offset, patch_bytes in PERFECT_SHOT_LEGACY_CONTROL_PATCHES:
+            self.legacy_control_originals[offset] = self.mem.read_bytes(self.legacy_entry + offset, len(patch_bytes))
         self.legacy_patch_originals = {}
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             original = bytes((index + 1) % 256 for index in range(len(patch_bytes)))
@@ -265,17 +271,17 @@ class PerfectShotBetaTests(unittest.TestCase):
                 self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
                 patch_bytes,
             )
-        self.assertEqual(self.mem.read_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET), 0)
-        self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET), 0)
-        self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET), 0)
+        self.assertEqual(self.mem.read_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET), PERFECT_SHOT_FORCED_ENABLE_VALUE)
+        self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET), PERFECT_SHOT_FORCED_LOCK_VALUE)
+        self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET), PERFECT_SHOT_FORCED_LOCK_VALUE)
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             self.assertEqual(
                 self.mem.read_bytes(self.legacy_entry + offset, len(patch_bytes)),
-                self.legacy_patch_originals[offset],
+                patch_bytes,
             )
-        self.assertEqual(summary["legacy_state_writes"], 0)
+        self.assertGreater(summary["legacy_state_writes"], 0)
         self.assertGreater(summary["runtime_patch_writes"], 0)
-        self.assertEqual(summary["legacy_cleared"], True)
+        self.assertEqual(summary["legacy_cleared"], False)
         self.assertEqual(summary["ai_team_delta_written"], PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED)
         self.assertEqual(summary["human_team_delta_written"], PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED)
         self.assertEqual(summary["coverage_delta_written"], PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED)
@@ -310,6 +316,9 @@ class PerfectShotBetaTests(unittest.TestCase):
             self.runtime_entry + SHOT_RUNTIME_IMPACT_DELTA_OFFSET,
             bytes([3] * SHOT_RUNTIME_AI_HUMAN_DELTA_SIZE),
         )
+        self.mem.write_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET, 0)
+        self.mem.write_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET, 0)
+        self.mem.write_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET, 0)
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             self.mem.write_bytes_at(self.legacy_entry + offset, bytes(len(patch_bytes)))
         self.mem.write_uint8(self.player.record_address + driving_layup.offset, 25)
@@ -355,12 +364,15 @@ class PerfectShotBetaTests(unittest.TestCase):
                 self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
                 patch_bytes,
             )
+        self.assertEqual(self.mem.read_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET), PERFECT_SHOT_FORCED_ENABLE_VALUE)
+        self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET), PERFECT_SHOT_FORCED_LOCK_VALUE)
+        self.assertEqual(self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET), PERFECT_SHOT_FORCED_LOCK_VALUE)
         for offset, patch_bytes in PERFECT_SHOT_LEGACY_STATE_PATCHES:
             self.assertEqual(
                 self.mem.read_bytes(self.legacy_entry + offset, len(patch_bytes)),
-                bytes(len(patch_bytes)),
+                patch_bytes,
             )
-        self.assertEqual(summary["legacy_state_writes"], 0)
+        self.assertGreater(summary["legacy_state_writes"], 0)
         self.assertGreater(summary["runtime_patch_writes"], 0)
         self.assertGreater(summary["roster_boost_writes"], 0)
         self.assertEqual(self.pm._read_attribute_direct(self.player, driving_layup), 99)
@@ -375,7 +387,7 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.assertTrue(summary["restored"])
         self.assertGreater(summary["restored_match_writes"], 0)
         self.assertGreater(summary["restored_roster_writes"], 0)
-        self.assertEqual(summary["restored_legacy_state_writes"], 0)
+        self.assertGreater(summary["restored_legacy_state_writes"], 0)
         self.assertEqual(summary["target_team_name"], "Lakers")
         self.assertEqual(
             self.mem.read_bytes(
@@ -410,6 +422,18 @@ class PerfectShotBetaTests(unittest.TestCase):
                 self.mem.read_bytes(self.runtime_entry + offset, len(patch_bytes)),
                 self.runtime_patch_originals[name],
             )
+        self.assertEqual(
+            self.mem.read_uint8(self.legacy_entry + PERFECT_SHOT_ENABLE_OFFSET),
+            int.from_bytes(self.legacy_control_originals[PERFECT_SHOT_ENABLE_OFFSET], byteorder="little"),
+        )
+        self.assertEqual(
+            self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_OFFSET),
+            int.from_bytes(self.legacy_control_originals[PERFECT_SHOT_LOCK_TIMER_OFFSET], byteorder="little"),
+        )
+        self.assertEqual(
+            self.mem.read_uint32(self.legacy_entry + PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET),
+            int.from_bytes(self.legacy_control_originals[PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET], byteorder="little"),
+        )
         for offset, original in self.legacy_patch_originals.items():
             self.assertEqual(
                 self.mem.read_bytes(self.legacy_entry + offset, len(original)),
@@ -449,7 +473,7 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.assertTrue(state["human_team_delta_written"])
         self.assertTrue(state["coverage_delta_written"])
         self.assertTrue(state["impact_delta_written"])
-        self.assertEqual(state["legacy_state_writes"], 0)
+        self.assertGreater(state["legacy_state_writes"], 0)
         self.assertEqual(state["legacy_manager_base"], hex(self.manager_base))
         self.assertEqual(state["legacy_entries"][0]["base"], hex(self.legacy_entry))
 
@@ -465,6 +489,7 @@ class PerfectShotBetaTests(unittest.TestCase):
         self.assertIn("No active in-match copies", summary["reason"])
         self.assertFalse(self.pm.get_perfect_shot_beta_state()["active"])
         self.assertGreater(summary["restored_runtime_writes"], 0)
+        self.assertGreater(summary["restored_legacy_state_writes"], 0)
 
     def test_start_perfect_shot_beta_debuffs_live_opponent_and_restores_on_stop(self):
         opponent = Player(

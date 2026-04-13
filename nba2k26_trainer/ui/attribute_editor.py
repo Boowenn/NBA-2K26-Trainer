@@ -451,7 +451,7 @@ class AttributeEditorWidget(QWidget):
             f" Impact={'yes' if summary.get('impact_delta_written') else 'no'}",
             f"Shot tuning patches applied: {summary.get('runtime_patch_writes', 0)}",
             "Shared runtime shot-result patches are active for this live game.",
-            f"Legacy global lock cleared: {'yes' if summary.get('legacy_cleared') else 'no'}",
+            f"Legacy live shot-state patches: {summary.get('legacy_state_writes', 0)} writes",
             f"Temporary roster shooting boosts: {summary.get('roster_boost_players', 0)} players / {summary.get('roster_boost_writes', 0)} writes",
             f"Live match players boosted: {summary.get('match_boost_players', 0)}",
             f"Live match entries boosted: {summary.get('match_boost_entries', 0)}",
