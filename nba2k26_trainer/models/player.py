@@ -347,8 +347,8 @@ PERFECT_SHOT_OPPONENT_MATCH_PROFILE_VALUES: Dict[str, int] = {
 }
 PERFECT_SHOT_OPPONENT_ROSTER_PROFILE_VALUES: Dict[str, int] = dict(PERFECT_SHOT_OPPONENT_CORE_PROFILE_VALUES)
 PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL = 25
-PERFECT_SHOT_HEAVY_REFRESH_INTERVAL_SECONDS = 0.35
-PERFECT_SHOT_MATCH_CACHE_CLEAR_INTERVAL_SECONDS = 1.5
+PERFECT_SHOT_HEAVY_REFRESH_INTERVAL_SECONDS = 0.5
+PERFECT_SHOT_MATCH_CACHE_CLEAR_INTERVAL_SECONDS = 12.0
 # Shared runtime shot-result patches are global for the live game.
 # Pair them with a temporary live-opponent debuff so the selected MyGM team
 # gets the strongest benefit while the opposing AI is dampened and restored on stop.
@@ -374,7 +374,12 @@ PERFECT_SHOT_LEGACY_STATE_PATCHES: Tuple[Tuple[int, bytes], ...] = (
     # These flag clusters oscillate together in the live legacy shot-state.
     # Holding the full 4-byte cluster is materially more stable than only
     # forcing the two inner bytes at +0x452/+0xBF2.
+    # The mirrored floats at +0x1C0/+0x960 also pulse with the same cadence in
+    # live play; keeping them pinned avoids the gate falling back to a tiny
+    # non-zero weight between refreshes.
+    (0x1C0, struct.pack("<f", 1.0)),
     (0x450, b"\x01\x00\x01\x01"),
+    (0x960, struct.pack("<f", 1.0)),
     (0xBF0, b"\x01\x00\x01\x01"),
 )
 SHOT_RUNTIME_GLOBAL_PTR_SLOT = 0x14683DE68
@@ -3668,4 +3673,38 @@ class PlayerManager:
         }
 
     def enforce_perfect_shot_beta(self) -> Dict[str, Any]:
-        return self.refresh_perfect_shot_beta()
+        state = self._perfect_shot_beta_state
+        if not state:
+            return {"active": False}
+
+        runtime_patch_summary = {
+            "writes": 0,
+            "applied": {},
+        }
+        if state.get("shared_runtime_patches_enabled"):
+            runtime_patch_summary = self._apply_runtime_perfect_shot_patches(
+                state.get("runtime_patch_originals", {})
+            )
+        runtime_applied = runtime_patch_summary.get("applied", {})
+        state.update(runtime_applied)
+        state["runtime_patch_writes"] = int(runtime_patch_summary["writes"])
+
+        legacy_state_writes = 0
+        if state.get("shared_legacy_patches_enabled"):
+            legacy_state_writes = self._apply_legacy_perfect_shot_patches(
+                state.get("legacy_state_originals", {})
+            )
+        state["legacy_state_writes"] = legacy_state_writes
+
+        return {
+            "active": True,
+            "runtime_patch_writes": int(runtime_patch_summary["writes"]),
+            "legacy_state_writes": legacy_state_writes,
+            "ai_delta_written": bool(
+                runtime_applied.get("ai_team_delta") or runtime_applied.get("human_team_delta")
+            ),
+            "ai_team_delta_written": bool(runtime_applied.get("ai_team_delta")),
+            "human_team_delta_written": bool(runtime_applied.get("human_team_delta")),
+            "coverage_delta_written": bool(runtime_applied.get("coverage_delta")),
+            "impact_delta_written": bool(runtime_applied.get("impact_delta")),
+        }

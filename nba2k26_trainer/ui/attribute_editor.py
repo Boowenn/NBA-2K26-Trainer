@@ -146,9 +146,14 @@ class AttributeEditorWidget(QWidget):
         self.current_player: Optional[Player] = None
         self._attr_rows: Dict[str, AttributeRow] = {}
         self._perfect_shot_team_resolver: Optional[Callable[[], Optional[Dict[str, Any]]]] = None
-        self._perfect_shot_timer = QTimer(self)
-        self._perfect_shot_timer.setInterval(10)
-        self._perfect_shot_timer.timeout.connect(self._on_perfect_shot_tick)
+        self._perfect_shot_sustain_timer = QTimer(self)
+        self._perfect_shot_sustain_timer.setTimerType(Qt.PreciseTimer)
+        self._perfect_shot_sustain_timer.setInterval(1)
+        self._perfect_shot_sustain_timer.timeout.connect(self._on_perfect_shot_sustain_tick)
+        self._perfect_shot_refresh_timer = QTimer(self)
+        self._perfect_shot_refresh_timer.setTimerType(Qt.PreciseTimer)
+        self._perfect_shot_refresh_timer.setInterval(100)
+        self._perfect_shot_refresh_timer.timeout.connect(self._on_perfect_shot_refresh_tick)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -381,6 +386,10 @@ class AttributeEditorWidget(QWidget):
         self.btn_perfect_shot.setText("Stop Lock Green Beta" if active else "Lock Green Beta")
         self.btn_perfect_shot.blockSignals(False)
 
+    def _stop_perfect_shot_timers(self) -> None:
+        self._perfect_shot_sustain_timer.stop()
+        self._perfect_shot_refresh_timer.stop()
+
     def set_perfect_shot_team_resolver(self, resolver: Optional[Callable[[], Optional[Dict[str, Any]]]]) -> None:
         self._perfect_shot_team_resolver = resolver
 
@@ -407,7 +416,7 @@ class AttributeEditorWidget(QWidget):
             return
 
         if not checked:
-            self._perfect_shot_timer.stop()
+            self._stop_perfect_shot_timers()
             self.player_mgr.stop_perfect_shot_beta()
             self._set_perfect_shot_button_state(False)
             return
@@ -432,7 +441,8 @@ class AttributeEditorWidget(QWidget):
             )
             return
 
-        self._perfect_shot_timer.start()
+        self._perfect_shot_sustain_timer.start()
+        self._perfect_shot_refresh_timer.start()
         self._set_perfect_shot_button_state(True)
         target_source = str(target.get("source") or "auto")
 
@@ -463,14 +473,26 @@ class AttributeEditorWidget(QWidget):
         ]
         QMessageBox.information(self, "Lock Green Beta Enabled", "\n".join(lines))
 
-    def _on_perfect_shot_tick(self) -> None:
+    def _on_perfect_shot_sustain_tick(self) -> None:
         if self.player_mgr is None:
-            self._perfect_shot_timer.stop()
+            self._stop_perfect_shot_timers()
             self._set_perfect_shot_button_state(False)
             return
+
+        summary = self.player_mgr.enforce_perfect_shot_beta()
+        if not summary.get("active"):
+            self._stop_perfect_shot_timers()
+            self._set_perfect_shot_button_state(False)
+
+    def _on_perfect_shot_refresh_tick(self) -> None:
+        if self.player_mgr is None:
+            self._stop_perfect_shot_timers()
+            self._set_perfect_shot_button_state(False)
+            return
+
         summary = self.player_mgr.refresh_perfect_shot_beta()
         if not summary.get("active"):
-            self._perfect_shot_timer.stop()
+            self._stop_perfect_shot_timers()
             self._set_perfect_shot_button_state(False)
             reason = summary.get("reason")
             if reason:
@@ -478,7 +500,7 @@ class AttributeEditorWidget(QWidget):
 
     def set_player_manager(self, mgr: Optional[PlayerManager]):
         if mgr is None:
-            self._perfect_shot_timer.stop()
+            self._stop_perfect_shot_timers()
             self._set_perfect_shot_button_state(False)
             if self.player_mgr is not None:
                 self.player_mgr.stop_perfect_shot_beta(restore_live_memory=False)
