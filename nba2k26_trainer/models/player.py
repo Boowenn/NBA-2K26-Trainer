@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import struct
+import time
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
@@ -346,6 +347,8 @@ PERFECT_SHOT_OPPONENT_MATCH_PROFILE_VALUES: Dict[str, int] = {
 }
 PERFECT_SHOT_OPPONENT_ROSTER_PROFILE_VALUES: Dict[str, int] = dict(PERFECT_SHOT_OPPONENT_CORE_PROFILE_VALUES)
 PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL = 25
+PERFECT_SHOT_HEAVY_REFRESH_INTERVAL_SECONDS = 0.35
+PERFECT_SHOT_MATCH_CACHE_CLEAR_INTERVAL_SECONDS = 1.5
 # Shared runtime shot-result patches are global for the live game.
 # Pair them with a temporary live-opponent debuff so the selected MyGM team
 # gets the strongest benefit while the opposing AI is dampened and restored on stop.
@@ -368,8 +371,11 @@ PERFECT_SHOT_LEGACY_CONTROL_PATCHES: Tuple[Tuple[int, bytes], ...] = (
     (PERFECT_SHOT_LOCK_TIMER_ALT_OFFSET, struct.pack("<I", PERFECT_SHOT_FORCED_LOCK_VALUE)),
 )
 PERFECT_SHOT_LEGACY_STATE_PATCHES: Tuple[Tuple[int, bytes], ...] = (
-    (0x452, b"\x01\x01"),
-    (0xBF2, b"\x01\x01"),
+    # These flag clusters oscillate together in the live legacy shot-state.
+    # Holding the full 4-byte cluster is materially more stable than only
+    # forcing the two inner bytes at +0x452/+0xBF2.
+    (0x450, b"\x01\x00\x01\x01"),
+    (0xBF0, b"\x01\x00\x01\x01"),
 )
 SHOT_RUNTIME_GLOBAL_PTR_SLOT = 0x14683DE68
 SHOT_RUNTIME_CONTAINER_OFFSET = 0xA8
@@ -3371,6 +3377,8 @@ class PlayerManager:
             "opponent_match_boost_writes": opponent_match_summary["match_boost_writes"],
             "shared_runtime_patches_enabled": PERFECT_SHOT_SHARED_RUNTIME_PATCHES_ENABLED,
             "shared_legacy_patches_enabled": PERFECT_SHOT_SHARED_LEGACY_PATCHES_ENABLED,
+            "next_heavy_refresh_at": 0.0,
+            "next_match_cache_clear_at": time.perf_counter() + PERFECT_SHOT_MATCH_CACHE_CLEAR_INTERVAL_SECONDS,
         }
         self._perfect_shot_beta_state.update(runtime_applied)
 
@@ -3426,59 +3434,81 @@ class PlayerManager:
         state.update(runtime_applied)
         state["runtime_patch_writes"] = int(runtime_patch_summary["writes"])
         state["refresh_counter"] = int(state.get("refresh_counter", 0)) + 1
-        if state["refresh_counter"] % PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL == 0:
-            self._clear_match_compact_cache_for_team(int(state["team_id"]), state["team_name"])
+        now = time.perf_counter()
+        should_run_heavy_refresh = now >= float(state.get("next_heavy_refresh_at", 0.0))
+        should_clear_match_cache = now >= float(state.get("next_match_cache_clear_at", 0.0))
 
-        roster_boost_summary = self._apply_perfect_shot_roster_boosts(
-            int(state["team_id"]),
-            state["team_name"],
-            state["roster_originals"],
-        )
-        state["roster_boost_players"] = roster_boost_summary["roster_boost_players"]
-        state["roster_boost_writes"] = roster_boost_summary["roster_boost_writes"]
-
-        match_boost_summary = self._apply_perfect_shot_match_boosts(
-            int(state["team_id"]),
-            state["team_name"],
-            state["match_copy_originals"],
-        )
-        state["match_boost_players"] = match_boost_summary["match_boost_players"]
-        state["match_boost_entries"] = match_boost_summary["match_boost_entries"]
-        state["match_boost_writes"] = match_boost_summary["match_boost_writes"]
-
+        roster_boost_summary = {
+            "roster_boost_players": int(state.get("roster_boost_players", 0)),
+            "roster_boost_writes": int(state.get("roster_boost_writes", 0)),
+        }
+        match_boost_summary = {
+            "match_boost_players": int(state.get("match_boost_players", 0)),
+            "match_boost_entries": int(state.get("match_boost_entries", 0)),
+            "match_boost_writes": int(state.get("match_boost_writes", 0)),
+        }
         opponent_roster_summary = {
-            "roster_boost_players": 0,
-            "roster_boost_writes": 0,
+            "roster_boost_players": int(state.get("opponent_roster_boost_players", 0)),
+            "roster_boost_writes": int(state.get("opponent_roster_boost_writes", 0)),
         }
         opponent_match_summary = {
-            "match_boost_players": 0,
-            "match_boost_entries": 0,
-            "match_boost_writes": 0,
+            "match_boost_players": int(state.get("opponent_match_boost_players", 0)),
+            "match_boost_entries": int(state.get("opponent_match_boost_entries", 0)),
+            "match_boost_writes": int(state.get("opponent_match_boost_writes", 0)),
         }
-        opponent_team_id = state.get("opponent_team_id")
-        opponent_team_name = state.get("opponent_team_name")
-        if opponent_team_id is not None or opponent_team_name:
-            opponent_roster_summary = self._apply_perfect_shot_opponent_roster_debuffs(
-                int(opponent_team_id) if opponent_team_id is not None else UNKNOWN_TEAM_ID,
-                opponent_team_name,
-                state["opponent_roster_originals"],
+
+        if should_run_heavy_refresh:
+            if should_clear_match_cache or (
+                state["refresh_counter"] % PERFECT_SHOT_MATCH_CACHE_REFRESH_INTERVAL == 0
+            ):
+                self._clear_match_compact_cache_for_team(int(state["team_id"]), state["team_name"])
+                state["next_match_cache_clear_at"] = (
+                    now + PERFECT_SHOT_MATCH_CACHE_CLEAR_INTERVAL_SECONDS
+                )
+
+            roster_boost_summary = self._apply_perfect_shot_roster_boosts(
+                int(state["team_id"]),
+                state["team_name"],
+                state["roster_originals"],
             )
-            opponent_match_summary = self._apply_perfect_shot_opponent_match_debuffs(
-                int(opponent_team_id) if opponent_team_id is not None else UNKNOWN_TEAM_ID,
-                opponent_team_name,
-                state["opponent_match_originals"],
+            state["roster_boost_players"] = roster_boost_summary["roster_boost_players"]
+            state["roster_boost_writes"] = roster_boost_summary["roster_boost_writes"]
+
+            match_boost_summary = self._apply_perfect_shot_match_boosts(
+                int(state["team_id"]),
+                state["team_name"],
+                state["match_copy_originals"],
             )
+            state["match_boost_players"] = match_boost_summary["match_boost_players"]
+            state["match_boost_entries"] = match_boost_summary["match_boost_entries"]
+            state["match_boost_writes"] = match_boost_summary["match_boost_writes"]
+
+            opponent_team_id = state.get("opponent_team_id")
+            opponent_team_name = state.get("opponent_team_name")
+            if opponent_team_id is not None or opponent_team_name:
+                opponent_roster_summary = self._apply_perfect_shot_opponent_roster_debuffs(
+                    int(opponent_team_id) if opponent_team_id is not None else UNKNOWN_TEAM_ID,
+                    opponent_team_name,
+                    state["opponent_roster_originals"],
+                )
+                opponent_match_summary = self._apply_perfect_shot_opponent_match_debuffs(
+                    int(opponent_team_id) if opponent_team_id is not None else UNKNOWN_TEAM_ID,
+                    opponent_team_name,
+                    state["opponent_match_originals"],
+                )
+            state["opponent_roster_boost_players"] = opponent_roster_summary["roster_boost_players"]
+            state["opponent_roster_boost_writes"] = opponent_roster_summary["roster_boost_writes"]
+            state["opponent_match_boost_players"] = opponent_match_summary["match_boost_players"]
+            state["opponent_match_boost_entries"] = opponent_match_summary["match_boost_entries"]
+            state["opponent_match_boost_writes"] = opponent_match_summary["match_boost_writes"]
+            state["next_heavy_refresh_at"] = now + PERFECT_SHOT_HEAVY_REFRESH_INTERVAL_SECONDS
+
         legacy_state_writes = 0
         if state.get("shared_legacy_patches_enabled"):
             legacy_state_writes = self._apply_legacy_perfect_shot_patches(
                 state.get("legacy_state_originals", {})
             )
         state["legacy_state_writes"] = legacy_state_writes
-        state["opponent_roster_boost_players"] = opponent_roster_summary["roster_boost_players"]
-        state["opponent_roster_boost_writes"] = opponent_roster_summary["roster_boost_writes"]
-        state["opponent_match_boost_players"] = opponent_match_summary["match_boost_players"]
-        state["opponent_match_boost_entries"] = opponent_match_summary["match_boost_entries"]
-        state["opponent_match_boost_writes"] = opponent_match_summary["match_boost_writes"]
 
         return {
             "active": True,
@@ -3494,6 +3524,7 @@ class PlayerManager:
             "impact_delta_written": bool(runtime_applied.get("impact_delta")),
             "runtime_patch_writes": int(runtime_patch_summary["writes"]),
             "legacy_state_writes": legacy_state_writes,
+            "heavy_refresh_applied": should_run_heavy_refresh,
             "roster_boost_players": roster_boost_summary["roster_boost_players"],
             "roster_boost_writes": roster_boost_summary["roster_boost_writes"],
             "opponent_team_name": state.get("opponent_team_name"),
