@@ -356,6 +356,95 @@ class PlayerTableScoringTests(unittest.TestCase):
 
         self.assertEqual(best, PLAYER_TABLE_BASE)
 
+    def test_resolve_table_base_scans_past_weak_config_snapshot_in_current_mode(self):
+        config_team = 0x972000
+        active_team = 0x973000
+        self._write_team_record(config_team, "Lakers")
+        self._write_team_record(active_team, "Lakers")
+
+        config_players = [
+            ("Dalton", "Knecht", 2001, 80, config_team),
+            ("Bronny", "James Jr.", 2004, 72, config_team),
+            ("Moritz", "Wagner", 1997, 75, config_team),
+            ("D'Angelo", "Russell", 1996, 77, config_team),
+        ]
+        for index in range(120):
+            first_name, last_name, birth_year, overall, team_ptr = config_players[index % len(config_players)]
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=overall,
+                team_ptr=team_ptr,
+                team_ptr_offset=184,
+            )
+
+        active_players = [
+            ("Luka", "Doncic", 1999, 94, active_team),
+            ("Austin", "Reaves", 1998, 84, active_team),
+            ("LeBron", "James", 1984, 90, active_team),
+            ("Rui", "Hachimura", 1998, 79, active_team),
+        ]
+        for index in range(120):
+            first_name, last_name, birth_year, overall, team_ptr = active_players[index % len(active_players)]
+            self._write_record(
+                NOISE_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=overall,
+                team_ptr=team_ptr,
+            )
+
+        self.pm._count_module_pointer_refs = lambda table_base: {
+            PLAYER_TABLE_BASE: 7,
+            NOISE_TABLE_BASE: 26,
+        }.get(table_base, 0)
+        self.pm._get_config_player_table_candidates = lambda: [
+            (PLAYER_TABLE_BASE, "module_base + stale snapshot")
+        ]
+
+        self.pm.set_roster_mode("current")
+        with patch(
+            "nba2k26_trainer.models.player.scan_for_player_table_candidates",
+            return_value=[(NOISE_TABLE_BASE, 50)],
+        ), patch(
+            "nba2k26_trainer.models.player.scan_for_base_pointer",
+            return_value=None,
+        ):
+            resolved = self.pm._resolve_table_base(use_cached=False)
+
+        self.assertEqual(resolved, NOISE_TABLE_BASE)
+
+    def test_cached_current_table_requires_minimum_module_refs(self):
+        for index, (first_name, last_name, birth_year) in enumerate(
+            [
+                ("Luka", "Doncic", 1999),
+                ("Austin", "Reaves", 1998),
+                ("LeBron", "James", 1984),
+                ("Rui", "Hachimura", 1998),
+            ]
+        ):
+            self._write_record(
+                PLAYER_TABLE_BASE,
+                index,
+                first_name=first_name,
+                last_name=last_name,
+                birth_year=birth_year,
+                overall=80,
+            )
+
+        self.pm.set_roster_mode("current")
+        self.pm._get_config_player_table_candidates = lambda: [
+            (PLAYER_TABLE_BASE, "module_base + stale snapshot")
+        ]
+        self.pm._count_module_pointer_refs = lambda _table_base: 7
+
+        self.assertFalse(self.pm._is_cached_table_base_valid(PLAYER_TABLE_BASE))
+
     def test_resolve_live_team_ptr_offset_prefers_current_team_assignments(self):
         current_teams = [
             (0x950000, "Lakers"),
@@ -446,6 +535,10 @@ class PlayerTableScoringTests(unittest.TestCase):
         self.assertEqual(live_attr.type, "bitfield")
 
         self.pm.set_roster_mode("current")
+        self.pm._count_module_pointer_refs = lambda _table_base: 8
+        self.pm._get_config_player_table_candidates = lambda: [
+            (PLAYER_TABLE_BASE, "module_base + current save")
+        ]
         self.pm._table_base = PLAYER_TABLE_BASE
         with patch("nba2k26_trainer.models.player.MIN_ACCEPTABLE_PLAYER_COUNT", 24):
             players = self.pm.scan_players()

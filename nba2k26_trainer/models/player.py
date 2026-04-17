@@ -654,7 +654,7 @@ class PlayerManager:
         if valid_names < 3:
             return False
 
-        if self.roster_mode == "auto":
+        if self.roster_mode in {"auto", "current"}:
             config_candidates = {base for base, _ in self._get_config_player_table_candidates()}
             if config_candidates and table_base not in config_candidates:
                 return self._count_module_pointer_refs(table_base) >= ACTIVE_TABLE_MIN_MODULE_REFS
@@ -1903,8 +1903,7 @@ class PlayerManager:
             )
             weak_config_snapshot = (
                 self.roster_mode in {"auto", "current"}
-                and best_metrics.module_ref_count < CACHED_TABLE_MIN_MODULE_REFS
-                and best_metrics.estimated_player_count < MIN_ACCEPTABLE_PLAYER_COUNT
+                and best_metrics.module_ref_count < ACTIVE_TABLE_MIN_MODULE_REFS
             )
             if self._matches_requested_roster_mode(best_metrics) and not weak_config_snapshot:
                 self._table_base = best_base

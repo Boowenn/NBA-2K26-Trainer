@@ -5,8 +5,8 @@
   "source": "https://github.com/discobisco/2k26-Editor",
 
   "player_table": {
-    "base_pointer": 132104016,
-    "base_pointer_hex": "0x7DFBF50",
+    "base_pointer": 132104032,
+    "base_pointer_hex": "0x7DFBF60",
     "pointer_offsets": [],
     "stride": 1176,
     "stride_hex": "0x498",
