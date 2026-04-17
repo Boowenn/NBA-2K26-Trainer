@@ -3,7 +3,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from nba2k26_trainer.core.offsets import initialize_offsets
-from nba2k26_trainer.models.player import Player, PlayerManager, _is_valid_name
+from nba2k26_trainer.models.player import (
+    Player,
+    PlayerManager,
+    UNKNOWN_TEAM_ID,
+    UNASSIGNED_TEAM_NAME,
+    _is_valid_name,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -977,6 +983,47 @@ class PlayerTableScoringTests(unittest.TestCase):
         self.assertEqual(self.pm.read_attribute(player, contract_years), 6)
         for attr in salary_attrs:
             self.assertEqual(self.pm.read_attribute(player, attr), 52627153)
+
+    def test_team_slot_assignment_map_overrides_save_roster_memberships(self):
+        lakers_team = 0x910000
+        nets_team = 0x920000
+        warriors_team = 0x930000
+
+        self.mem.write_bytes_at(lakers_team + 0x00, (PLAYER_TABLE_BASE + 0x100).to_bytes(8, byteorder="little"))
+        self.mem.write_bytes_at(lakers_team + 0x08, (PLAYER_TABLE_BASE + 0x200).to_bytes(8, byteorder="little"))
+        self.mem.write_bytes_at(lakers_team + 0x60, (PLAYER_TABLE_BASE + 0x300).to_bytes(8, byteorder="little"))
+        self.mem.write_bytes_at(nets_team + 0x00, (PLAYER_TABLE_BASE + 0x600).to_bytes(8, byteorder="little"))
+        self.mem.write_bytes_at(nets_team + 0x08, (PLAYER_TABLE_BASE + 0x400).to_bytes(8, byteorder="little"))
+
+        players = [
+            Player(index=0, record_address=PLAYER_TABLE_BASE + 0x100, first_name="Luka", last_name="Doncic", team_name="Lakers", team_id=1003),
+            Player(index=1, record_address=PLAYER_TABLE_BASE + 0x200, first_name="Austin", last_name="Reaves", team_name="Lakers", team_id=1003),
+            Player(index=2, record_address=PLAYER_TABLE_BASE + 0x300, first_name="Buddy", last_name="Hield", team_name="Warriors", team_id=1025),
+            Player(index=3, record_address=PLAYER_TABLE_BASE + 0x400, first_name="LeBron", last_name="James", team_name="Lakers", team_id=1003),
+            Player(index=4, record_address=PLAYER_TABLE_BASE + 0x500, first_name="Jalen", last_name="Hood-Schifino", team_name="Lakers", team_id=1003),
+            Player(index=5, record_address=PLAYER_TABLE_BASE + 0x600, first_name="Nic", last_name="Claxton", team_name="Nets", team_id=1007),
+        ]
+        record_team_ptrs = {
+            PLAYER_TABLE_BASE + 0x100: lakers_team,
+            PLAYER_TABLE_BASE + 0x200: lakers_team,
+            PLAYER_TABLE_BASE + 0x300: warriors_team,
+            PLAYER_TABLE_BASE + 0x400: lakers_team,
+            PLAYER_TABLE_BASE + 0x500: lakers_team,
+            PLAYER_TABLE_BASE + 0x600: nets_team,
+        }
+
+        applied = self.pm._apply_team_slot_assignment_map(players, record_team_ptrs)
+        players_by_name = {player.full_name: player for player in players}
+
+        self.assertTrue(applied)
+        self.assertEqual(players_by_name["Luka Doncic"].team_name, "Lakers")
+        self.assertEqual(players_by_name["Austin Reaves"].team_name, "Lakers")
+        self.assertEqual(players_by_name["Buddy Hield"].team_name, "Lakers")
+        self.assertEqual(players_by_name["Buddy Hield"].team_id, 1003)
+        self.assertEqual(players_by_name["LeBron James"].team_name, "Nets")
+        self.assertEqual(players_by_name["LeBron James"].team_id, 1007)
+        self.assertEqual(players_by_name["Jalen Hood-Schifino"].team_name, UNASSIGNED_TEAM_NAME)
+        self.assertEqual(players_by_name["Jalen Hood-Schifino"].team_id, UNKNOWN_TEAM_ID)
 
 
 if __name__ == "__main__":

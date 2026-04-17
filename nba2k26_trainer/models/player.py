@@ -39,6 +39,7 @@ MAX_ACCEPTABLE_DUPLICATE_NAME_INSTANCES = 12
 MAX_ACCEPTABLE_NAME_REPEAT = 3
 FREE_AGENT_TEAM_ID = -2
 UNKNOWN_TEAM_ID = -3
+UNASSIGNED_TEAM_NAME = "Unassigned"
 PACKED_RATING_OFFSET_MIN = 993
 PACKED_RATING_OFFSET_MAX = 1045
 LIVE_BADGE_OFFSET_MIN = 1148
@@ -71,6 +72,7 @@ MATCH_COMPACT_VALIDATION_SLICES: Tuple[Tuple[int, int, int], ...] = (
     (0x2B8, MATCH_COMPACT_HANDLE_OFFSET, 16),
     (0x404, 0x1AC, 12),
 )
+TEAM_PLAYER_SLOT_OFFSETS: Tuple[int, ...] = tuple(range(0, 15 * 8, 8)) + (176, 184, 192)
 
 DEFAULT_TEAM_NAMES = {
     0: "ATL Hawks",
@@ -2097,6 +2099,76 @@ class PlayerManager:
         team_cache[cache_key] = resolved
         return resolved, next_dynamic_team_id
 
+    def _build_team_slot_assignment_map(
+        self,
+        players: List[Player],
+        record_team_ptrs: Dict[int, int],
+    ) -> Tuple[Dict[int, Tuple[str, int]], set[int]]:
+        if not players:
+            return {}, set()
+
+        players_by_address = {player.record_address: player for player in players}
+        team_ptr_to_info: Dict[int, Tuple[str, int]] = {}
+        for player in players:
+            team_ptr = int(record_team_ptrs.get(player.record_address) or 0)
+            if _is_pointer_like(team_ptr):
+                team_ptr_to_info[team_ptr] = (player.team_name, player.team_id)
+
+        slot_assignments: Dict[int, Tuple[str, int]] = {}
+        active_team_ptrs: set[int] = set()
+        for team_ptr, team_info in team_ptr_to_info.items():
+            team_hits = 0
+            for slot_offset in TEAM_PLAYER_SLOT_OFFSETS:
+                player_ptr = self.mem.read_uint64(team_ptr + slot_offset)
+                if not _is_pointer_like(player_ptr):
+                    continue
+                player_ptr = int(player_ptr)
+                if player_ptr not in players_by_address:
+                    continue
+                slot_assignments[player_ptr] = team_info
+                team_hits += 1
+            if team_hits > 0:
+                active_team_ptrs.add(team_ptr)
+
+        return slot_assignments, active_team_ptrs
+
+    def _apply_team_slot_assignment_map(
+        self,
+        players: List[Player],
+        record_team_ptrs: Dict[int, int],
+    ) -> bool:
+        # MyGM/MyNBA saves can keep the live roster in each team's Team Players
+        # slots even when the global player table still carries stale team_ptr data.
+        # Always let explicit team slots override the player table assignment.
+        slot_assignments, active_team_ptrs = self._build_team_slot_assignment_map(
+            players,
+            record_team_ptrs,
+        )
+        minimum_assignments = min(12, max(4, len(players) // 20))
+        if len(slot_assignments) < minimum_assignments:
+            return False
+
+        applied = False
+        for player in players:
+            assigned_team = slot_assignments.get(player.record_address)
+            if assigned_team is not None:
+                if (player.team_name, player.team_id) != assigned_team:
+                    applied = True
+                player.team_name, player.team_id = assigned_team
+                continue
+
+            original_team_ptr = int(record_team_ptrs.get(player.record_address) or 0)
+            if (
+                original_team_ptr in active_team_ptrs
+                and player.team_id not in {FREE_AGENT_TEAM_ID, UNKNOWN_TEAM_ID}
+            ):
+                if player.team_name != UNASSIGNED_TEAM_NAME or player.team_id != UNKNOWN_TEAM_ID:
+                    applied = True
+                player.team_name = UNASSIGNED_TEAM_NAME
+                player.team_id = UNKNOWN_TEAM_ID
+
+        return applied
+
     def _collect_players_from_table(
         self,
         table_base: int,
@@ -2106,6 +2178,7 @@ class PlayerManager:
         player_table = self.config.player_table
         players: List[Player] = []
         team_cache: Dict[int, Tuple[str, int]] = {}
+        record_team_ptrs: Dict[int, int] = {}
         next_dynamic_team_id = 1000
         overall_attr = self._resolve_live_overall_attr(table_base)
         birth_year_attr = self._get_birth_year_attr()
@@ -2148,6 +2221,7 @@ class PlayerManager:
                 if team_ptr_bytes and len(team_ptr_bytes) == 8
                 else self.mem.read_uint64(record_address + team_ptr_offset)
             )
+            record_team_ptrs[record_address] = int(team_ptr or 0)
             (player.team_name, player.team_id), next_dynamic_team_id = self._resolve_team_info(
                 team_ptr,
                 team_table_base,
@@ -2174,6 +2248,7 @@ class PlayerManager:
 
             players.append(player)
 
+        self._apply_team_slot_assignment_map(players, record_team_ptrs)
         return players
 
     def scan_players(self, progress_callback=None) -> List[Player]:
