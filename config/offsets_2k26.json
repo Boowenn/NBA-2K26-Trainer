@@ -113,7 +113,7 @@
     ],
 
     "合同薪资": [
-      {"name": "合同剩余年数", "offset": 439, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 7, "description": "Contract Years Left"},
+      {"name": "合同剩余年数", "offset": 439, "type": "bitfield", "bit_start": 3, "bit_length": 3, "min": 0, "max": 6, "description": "Contract Years Left"},
       {"name": "第1年薪资", "offset": 468, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 1 Salary"},
       {"name": "第2年薪资", "offset": 472, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 2 Salary"},
       {"name": "第3年薪资", "offset": 476, "type": "bitfield", "bit_start": 0, "bit_length": 31, "min": 0, "max": 500000000, "description": "Year 3 Salary"},

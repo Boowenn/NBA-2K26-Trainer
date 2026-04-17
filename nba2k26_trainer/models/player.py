@@ -2714,7 +2714,10 @@ class PlayerManager:
                 except (IndexError, ValueError):
                     continue
                 highest_nonzero_year = max(highest_nonzero_year, year_number)
-        return highest_nonzero_year
+        contract_years_attr = self._get_contract_years_left_attr()
+        if contract_years_attr is None:
+            return highest_nonzero_year
+        return min(highest_nonzero_year, self._get_effective_contract_years_limit(contract_years_attr))
 
     def _get_contract_salary_attrs(self) -> List[AttributeDef]:
         attrs: List[AttributeDef] = []
@@ -2723,6 +2726,15 @@ class PlayerManager:
             if attr is not None:
                 attrs.append(attr)
         return attrs
+
+    def _get_effective_contract_years_limit(self, contract_years_attr: AttributeDef) -> int:
+        salary_slot_count = len(self._get_contract_salary_attrs())
+        if salary_slot_count <= 0:
+            return int(contract_years_attr.max_val)
+        return max(
+            int(contract_years_attr.min_val),
+            min(int(contract_years_attr.max_val), salary_slot_count),
+        )
 
     def _normalize_contract_write_values(
         self,
@@ -2741,7 +2753,10 @@ class PlayerManager:
         except (TypeError, ValueError):
             return normalized
 
-        target_years = max(contract_years_attr.min_val, min(contract_years_attr.max_val, target_years))
+        target_years = max(
+            contract_years_attr.min_val,
+            min(self._get_effective_contract_years_limit(contract_years_attr), target_years),
+        )
         normalized[contract_years_attr.name] = target_years
 
         salary_attrs = self._get_contract_salary_attrs()
@@ -2808,7 +2823,10 @@ class PlayerManager:
             return False
 
         target_years = self._infer_contract_years_left(player)
-        target_years = max(contract_years_attr.min_val, min(contract_years_attr.max_val, target_years))
+        target_years = max(
+            contract_years_attr.min_val,
+            min(self._get_effective_contract_years_limit(contract_years_attr), target_years),
+        )
         current_years = self._read_attribute_direct(player, contract_years_attr)
         if current_years == target_years:
             return True

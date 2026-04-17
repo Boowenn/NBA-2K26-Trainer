@@ -854,6 +854,37 @@ class PlayerTableScoringTests(unittest.TestCase):
         self.assertEqual(self.pm.read_attribute(player, salary_attrs[4]), 0)
         self.assertEqual(self.pm.read_attribute(player, salary_attrs[5]), 0)
 
+    def test_write_attribute_contract_years_clamps_to_six_salary_slots(self):
+        player = Player(
+            index=0,
+            record_address=PLAYER_TABLE_BASE,
+            first_name="LeBron",
+            last_name="James",
+        )
+        salary_attrs = [
+            self.config.find_attribute_by_description(f"Year {index} Salary")
+            for index in range(1, 7)
+        ]
+        contract_years = self.config.find_attribute_by_description("Contract Years Left")
+
+        self.mem.write_bitfield(
+            player.record_address + contract_years.offset,
+            contract_years.bit_start,
+            contract_years.bit_length,
+            1,
+        )
+        self.mem.write_bitfield(
+            player.record_address + salary_attrs[0].offset,
+            salary_attrs[0].bit_start,
+            salary_attrs[0].bit_length,
+            52627153,
+        )
+
+        self.assertTrue(self.pm.write_attribute(player, contract_years, 7))
+        self.assertEqual(self.pm.read_attribute(player, contract_years), 6)
+        for attr in salary_attrs:
+            self.assertEqual(self.pm.read_attribute(player, attr), 52627153)
+
 
 if __name__ == "__main__":
     unittest.main()
