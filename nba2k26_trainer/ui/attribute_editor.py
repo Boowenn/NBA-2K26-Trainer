@@ -1,48 +1,62 @@
-"""属性编辑面板 - 分类 Tab 展示所有可编辑属性"""
+"""Tabbed attribute editor and live tools for the trainer UI."""
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QScrollArea,
-    QLabel, QSpinBox, QDoubleSpinBox, QSlider, QGridLayout, QPushButton,
-    QMessageBox, QGroupBox, QFrame
-)
+from __future__ import annotations
+
+import os
+from typing import Any, Callable, Dict, List, Optional
+
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (
+    QDoubleSpinBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from ..core.offsets import OffsetConfig, AttributeDef
+from ..core.offsets import AttributeDef, OffsetConfig
 from ..models.player import Player, PlayerManager
-from typing import Callable, Dict, Optional, Any, List
+from ..presets import export_custom_preset, resolve_preset_values
+from .preset_dialog import PresetChooserDialog
 
 
 class AttributeRow(QWidget):
-    """单个属性编辑行"""
+    """One editable attribute row with a spinbox and optional slider."""
 
-    value_changed = pyqtSignal(str, int)  # (attr_name, new_value)
+    value_changed = pyqtSignal(str, object)
 
     def __init__(self, attr: AttributeDef, parent=None):
         super().__init__(parent)
         self.attr = attr
-        self._original_value: Optional[int] = None
+        self._is_float = self.attr.type == "float"
+        self._original_value: Optional[float] = None
         self._setup_ui()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(8)
 
-        self._is_float = self.attr.type == "float"
         numeric_range = self.attr.max_val - self.attr.min_val
         self._show_slider = (
             self.attr.type not in ("wstring", "ascii", "float")
             and numeric_range <= 1000
         )
 
-        # 属性名
         self.name_label = QLabel(self.attr.name)
         self.name_label.setFixedWidth(120)
         self.name_label.setToolTip(self.attr.description)
         layout.addWidget(self.name_label)
 
-        # 滑块 (仅数值型, 非 float)
         if self._show_slider:
             self.slider = QSlider(Qt.Horizontal)
             self.slider.setMinimum(self.attr.min_val)
@@ -53,7 +67,6 @@ class AttributeRow(QWidget):
             self.slider = None
             layout.addStretch(1)
 
-        # 数值输入
         if self._is_float:
             self.spin = QDoubleSpinBox()
             self.spin.setDecimals(2)
@@ -75,14 +88,13 @@ class AttributeRow(QWidget):
         self.spin.valueChanged.connect(self._on_spin_changed)
         layout.addWidget(self.spin)
 
-        # 原始值标签
         self.original_label = QLabel("")
-        self.original_label.setFixedWidth(50)
+        self.original_label.setFixedWidth(64)
         self.original_label.setStyleSheet("color: #888;")
         self.original_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.original_label)
 
-    def _on_slider_changed(self, value: int):
+    def _on_slider_changed(self, value: int) -> None:
         if self.spin.value() != value:
             self.spin.blockSignals(True)
             self.spin.setValue(value)
@@ -90,54 +102,67 @@ class AttributeRow(QWidget):
         self._check_modified()
         self.value_changed.emit(self.attr.name, value)
 
-    def _on_spin_changed(self, value: int):
-        if self.slider and self.slider.value() != value:
+    def _on_spin_changed(self, value: Any) -> None:
+        if self.slider and self.slider.value() != int(value):
             self.slider.blockSignals(True)
-            self.slider.setValue(value)
+            self.slider.setValue(int(value))
             self.slider.blockSignals(False)
         self._check_modified()
         self.value_changed.emit(self.attr.name, value)
 
-    def _check_modified(self):
-        if self._original_value is not None and self.spin.value() != self._original_value:
+    def _check_modified(self) -> None:
+        if self._original_value is None:
+            self.setStyleSheet("")
+            return
+
+        current = float(self.spin.value())
+        if abs(current - float(self._original_value)) > 1e-6:
             self.setStyleSheet("background-color: rgba(247, 127, 0, 0.15); border-radius: 4px;")
         else:
             self.setStyleSheet("")
 
-    def set_value(self, value: int, is_original: bool = False):
-        """设置属性值"""
+    def set_value(self, value: Any, is_original: bool = False) -> None:
         if value is None:
-            value = 0
-        value = max(self.attr.min_val, min(self.attr.max_val, int(value)))
+            value = 0.0 if self._is_float else 0
+
+        if self._is_float:
+            clamped = max(float(self.attr.min_val), min(float(self.attr.max_val), float(value)))
+        else:
+            clamped = max(self.attr.min_val, min(self.attr.max_val, int(value)))
 
         self.spin.blockSignals(True)
-        self.spin.setValue(value)
+        self.spin.setValue(clamped)
         self.spin.blockSignals(False)
 
-        if self.slider:
+        if self.slider is not None:
             self.slider.blockSignals(True)
-            self.slider.setValue(value)
+            self.slider.setValue(int(clamped))
             self.slider.blockSignals(False)
 
         if is_original:
-            self._original_value = value
-            self.original_label.setText(str(value))
+            self._original_value = float(clamped)
+            if self._is_float:
+                self.original_label.setText(f"{clamped:.2f}")
+            else:
+                self.original_label.setText(str(int(clamped)))
             self.setStyleSheet("")
 
-    def get_value(self) -> int:
+    def get_value(self) -> Any:
         return self.spin.value()
 
     def is_modified(self) -> bool:
-        return self._original_value is not None and self.spin.value() != self._original_value
+        if self._original_value is None:
+            return False
+        return abs(float(self.spin.value()) - float(self._original_value)) > 1e-6
 
-    def reset(self):
+    def reset(self) -> None:
         if self._original_value is not None:
             self.set_value(self._original_value)
             self.setStyleSheet("")
 
 
 class AttributeEditorWidget(QWidget):
-    """属性编辑面板"""
+    """Tabbed player editor plus preset and experimental live-tool controls."""
 
     def __init__(self, config: OffsetConfig, player_mgr: Optional[PlayerManager] = None, parent=None):
         super().__init__(parent)
@@ -146,27 +171,28 @@ class AttributeEditorWidget(QWidget):
         self.current_player: Optional[Player] = None
         self._attr_rows: Dict[str, AttributeRow] = {}
         self._perfect_shot_team_resolver: Optional[Callable[[], Optional[Dict[str, Any]]]] = None
+
         self._perfect_shot_sustain_timer = QTimer(self)
         self._perfect_shot_sustain_timer.setTimerType(Qt.PreciseTimer)
         self._perfect_shot_sustain_timer.setInterval(1)
         self._perfect_shot_sustain_timer.timeout.connect(self._on_perfect_shot_sustain_tick)
+
         self._perfect_shot_refresh_timer = QTimer(self)
         self._perfect_shot_refresh_timer.setTimerType(Qt.PreciseTimer)
         self._perfect_shot_refresh_timer.setInterval(100)
         self._perfect_shot_refresh_timer.timeout.connect(self._on_perfect_shot_refresh_tick)
+
         self._setup_ui()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # 球员信息头
-        self.player_info = QLabel("请选择一名球员")
+        self.player_info = QLabel("Select a player to inspect attributes.")
         self.player_info.setObjectName("title")
         layout.addWidget(self.player_info)
 
-        # Tab 面板
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget, 1)
 
@@ -175,45 +201,62 @@ class AttributeEditorWidget(QWidget):
             tab = self._create_category_tab(category, attrs)
             self.tab_widget.addTab(tab, category)
 
-        # 底部按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
 
-        self.btn_apply = QPushButton("应用修改")
+        self.btn_apply = QPushButton("Apply Changes")
         self.btn_apply.setObjectName("btn_apply")
         self.btn_apply.clicked.connect(self._on_apply)
-        btn_layout.addWidget(self.btn_apply)
+        button_row.addWidget(self.btn_apply)
 
-        self.btn_reset = QPushButton("还原")
+        self.btn_reset = QPushButton("Reset")
         self.btn_reset.clicked.connect(self._on_reset)
-        btn_layout.addWidget(self.btn_reset)
+        button_row.addWidget(self.btn_reset)
 
-        self.btn_max_offense = QPushButton("进攻全满")
+        self.btn_max_offense = QPushButton("Max Offense")
         self.btn_max_offense.setObjectName("btn_max")
-        self.btn_max_offense.clicked.connect(lambda: self._set_category_max("进攻能力"))
-        btn_layout.addWidget(self.btn_max_offense)
+        self.btn_max_offense.clicked.connect(
+            lambda: self._set_max_for_descriptions({"Close Shot", "Mid-Range Shot"})
+        )
+        button_row.addWidget(self.btn_max_offense)
 
-        self.btn_max_defense = QPushButton("防守全满")
+        self.btn_max_defense = QPushButton("Max Defense")
         self.btn_max_defense.setObjectName("btn_max")
-        self.btn_max_defense.clicked.connect(lambda: self._set_category_max("防守能力"))
-        btn_layout.addWidget(self.btn_max_defense)
+        self.btn_max_defense.clicked.connect(
+            lambda: self._set_max_for_descriptions({"Interior Defense", "Perimeter Defense"})
+        )
+        button_row.addWidget(self.btn_max_defense)
 
-        self.btn_max_all = QPushButton("全部满属性")
+        self.btn_max_all = QPushButton("Max Core")
         self.btn_max_all.setObjectName("btn_max")
         self.btn_max_all.clicked.connect(self._set_all_max)
-        btn_layout.addWidget(self.btn_max_all)
+        button_row.addWidget(self.btn_max_all)
 
-        self.btn_god = QPushButton("⚡ 超级模式")
+        self.btn_god = QPushButton("God Mode")
         self.btn_god.setObjectName("btn_god")
         self.btn_god.setToolTip(
-            "一键开启超级模式：全能力99 + 全徽章满级\n"
-            "+ 全投篮/突破/防守倾向拉满 + 全耐久满\n"
-            "+ 潜力拉满 → 投篮必进、突破无解"
+            "Max ratings, badges, tendencies, durability, and growth for the selected player."
         )
         self.btn_god.clicked.connect(self._apply_god_mode)
-        btn_layout.addWidget(self.btn_god)
+        button_row.addWidget(self.btn_god)
 
-        self.btn_perfect_shot = QPushButton("Lock Green Beta")
+        self.btn_save_preset = QPushButton("Save Preset")
+        self.btn_save_preset.clicked.connect(self._save_preset)
+        button_row.addWidget(self.btn_save_preset)
+
+        self.btn_apply_preset = QPushButton("Apply Preset...")
+        self.btn_apply_preset.setObjectName("btn_apply")
+        self.btn_apply_preset.clicked.connect(self._apply_preset)
+        button_row.addWidget(self.btn_apply_preset)
+
+        button_row.addStretch()
+        layout.addLayout(button_row)
+
+        experimental_group = QGroupBox("Experimental Live Tools")
+        experimental_layout = QHBoxLayout(experimental_group)
+        experimental_layout.setSpacing(10)
+
+        self.btn_perfect_shot = QPushButton("Live Shot Lab (Exp)")
         self.btn_perfect_shot.setObjectName("btn_max")
         self.btn_perfect_shot.setCheckable(True)
         self.btn_perfect_shot.setToolTip(
@@ -221,16 +264,21 @@ class AttributeEditorWidget(QWidget):
             "It prefers the current team filter, then falls back to the selected player.\n"
             "It zeroes the live AI timing error buffer and boosts only the in-match copies for your team.\n"
             "It does not modify the roster table or permanent player attributes.\n"
-            "Beta: this is safer than the old global lock, but it is still experimental."
+            "Experimental: use it like a live match lab, not a core roster-editing feature."
         )
         self.btn_perfect_shot.clicked.connect(self._toggle_perfect_shot_beta)
-        btn_layout.addWidget(self.btn_perfect_shot)
+        experimental_layout.addWidget(self.btn_perfect_shot)
 
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        experimental_note = QLabel(
+            "Live Shot Lab keeps temporary in-match tuning separate from permanent roster edits. "
+            "The main editor flow now focuses on stable player, team, and preset workflows."
+        )
+        experimental_note.setWordWrap(True)
+        experimental_note.setStyleSheet("color: #b8b8b8;")
+        experimental_layout.addWidget(experimental_note, 1)
+        layout.addWidget(experimental_group)
 
     def _create_category_tab(self, category: str, attrs: List[AttributeDef]) -> QWidget:
-        """创建一个属性分类 Tab"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -249,15 +297,14 @@ class AttributeEditorWidget(QWidget):
         scroll.setWidget(container)
         return scroll
 
-    def load_player(self, player: Player):
-        """加载球员数据到编辑面板"""
+    def load_player(self, player: Player) -> None:
         self.current_player = player
         info_parts = [player.full_name]
         if player.team_name:
             info_parts.append(player.team_name)
         info_parts.append(f"OVR {player.overall}")
         if player.age > 0:
-            info_parts.append(f"{player.age}岁 (生于{player.birth_year})")
+            info_parts.append(f"Age {player.age} (Birth Year {player.birth_year})")
         self.player_info.setText("  |  ".join(info_parts))
 
         if self.player_mgr is None:
@@ -265,79 +312,82 @@ class AttributeEditorWidget(QWidget):
 
         values = self.player_mgr.read_all_attributes(player)
         for attr_name, row in self._attr_rows.items():
-            val = values.get(attr_name)
-            if val is not None:
-                row.set_value(val, is_original=True)
+            value = values.get(attr_name)
+            if value is not None:
+                row.set_value(value, is_original=True)
 
-    def _on_apply(self):
-        """应用所有修改"""
-        if self.current_player is None or self.player_mgr is None:
-            QMessageBox.warning(self, "警告", "请先选择一名球员")
-            return
-
-        modified = {}
+    def _collect_modified_values(self) -> Dict[str, Any]:
+        modified: Dict[str, Any] = {}
         for attr_name, row in self._attr_rows.items():
             if row.is_modified():
                 modified[attr_name] = row.get_value()
+        return modified
 
+    def _on_apply(self) -> None:
+        if self.current_player is None or self.player_mgr is None:
+            QMessageBox.warning(self, "Apply Changes", "Select a player after connecting to the game first.")
+            return
+
+        modified = self._collect_modified_values()
         if not modified:
-            QMessageBox.information(self, "提示", "没有修改任何属性")
+            QMessageBox.information(self, "Apply Changes", "No staged edits were found.")
             return
 
         results = self.player_mgr.write_all_attributes(self.current_player, modified)
-        success = sum(1 for v in results.values() if v)
-        failed = sum(1 for v in results.values() if not v)
+        success = sum(1 for ok in results.values() if ok)
+        failed = sum(1 for ok in results.values() if not ok)
 
         if failed > 0:
             QMessageBox.warning(
-                self, "部分失败",
-                f"成功修改 {success} 项，失败 {failed} 项"
+                self,
+                "Apply Changes",
+                f"Updated {success} attributes, but {failed} writes failed.",
             )
         else:
-            QMessageBox.information(self, "成功", f"已成功修改 {success} 项属性")
+            QMessageBox.information(self, "Apply Changes", f"Updated {success} attributes.")
 
-        # 重新加载以更新原始值
         self.load_player(self.current_player)
 
-    def _on_reset(self):
-        """还原所有修改"""
+    def _on_reset(self) -> None:
         for row in self._attr_rows.values():
             row.reset()
 
-    def _set_category_max(self, category: str):
-        """将某分类所有属性设为最大值"""
-        if category not in self.config.attributes:
-            return
-        for attr in self.config.attributes[category]:
-            if attr.name in self._attr_rows and attr.type not in ("wstring", "ascii"):
+    def _categories_with_descriptions(self, samples: set[str]) -> List[str]:
+        lowered = {sample.strip().lower() for sample in samples}
+        categories: List[str] = []
+        for category, attrs in self.config.attributes.items():
+            descriptions = {(attr.description or attr.name).strip().lower() for attr in attrs}
+            if lowered & descriptions:
+                categories.append(category)
+        return categories
+
+    def _set_max_for_descriptions(self, samples: set[str]) -> None:
+        for category in self._categories_with_descriptions(samples):
+            for attr in self.config.attributes[category]:
+                if attr.type in ("wstring", "ascii"):
+                    continue
                 self._attr_rows[attr.name].set_value(attr.max_val)
 
-    def _set_all_max(self):
-        """全部属性设为最大值（能力值相关分类）"""
-        for category in ["进攻能力", "防守能力", "体能属性", "篮球智商"]:
-            self._set_category_max(category)
-        # 徽章全满
-        for category in self.config.categories():
-            if "徽章" in category:
-                self._set_category_max(category)
+    def _set_all_max(self) -> None:
+        self._set_max_for_descriptions({"Close Shot", "Interior Defense", "Speed", "Shot IQ"})
+        self._set_max_for_descriptions({"Aerial Wizard", "Deadeye", "Bailout"})
 
-    def _apply_god_mode(self):
-        """超级模式 - 直接写入内存，全属性拉满"""
+    def _apply_god_mode(self) -> None:
         if self.current_player is None or self.player_mgr is None:
-            QMessageBox.warning(self, "警告", "请先选择一名球员")
+            QMessageBox.warning(self, "God Mode", "Select a player after connecting to the game first.")
             return
 
         reply = QMessageBox.question(
-            self, "超级模式",
-            f"确定要对 {self.current_player.full_name} 开启超级模式？\n\n"
-            "将会设置：\n"
-            "• 全部能力值 → 99\n"
-            "• 全部徽章 → 最高等级\n"
-            "• 全部投篮/突破/防守倾向 → 最大值\n"
-            "• 全部耐久性 → 99\n"
-            "• 潜力/成长 → 最大值\n\n"
-            "效果：投篮几乎必进，包括半场三分",
-            QMessageBox.Yes | QMessageBox.No
+            self,
+            "God Mode",
+            "\n".join(
+                [
+                    f"Apply full God Mode to {self.current_player.full_name}?",
+                    "",
+                    "This will max ratings, badges, tendencies, durability, and growth values.",
+                ]
+            ),
+            QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
@@ -348,9 +398,7 @@ class AttributeEditorWidget(QWidget):
         compact_bases = summary.get("match_compact_bases", [])
         attr_summary = summary.get("attributes", {})
 
-        lines = [
-            f"Updated {count} attributes for {self.current_player.full_name}.",
-        ]
+        lines = [f"Updated {count} attributes for {self.current_player.full_name}."]
         if compact_count:
             compact_text = ", ".join(compact_bases[:3])
             if len(compact_bases) > 3:
@@ -377,13 +425,124 @@ class AttributeEditorWidget(QWidget):
             lines.append(f"{label}: {values.get('current')} | Match copies: {mirror_text}")
 
         QMessageBox.information(self, "God Mode Applied", "\n".join(lines))
-        # 重新加载显示
+        self.load_player(self.current_player)
+
+    def _save_preset(self) -> None:
+        modified = self._collect_modified_values()
+        if not modified:
+            QMessageBox.information(
+                self,
+                "Save Preset",
+                "Make some edits first. Presets are exported from the modified attributes only.",
+            )
+            return
+
+        default_name = "Custom Preset"
+        if self.current_player is not None and self.current_player.full_name:
+            default_name = f"{self.current_player.full_name} Build"
+
+        preset_name, accepted = QInputDialog.getText(
+            self,
+            "Save Preset",
+            "Preset name:",
+            text=default_name,
+        )
+        if not accepted:
+            return
+
+        preset_name = preset_name.strip()
+        if not preset_name:
+            QMessageBox.warning(self, "Save Preset", "Preset name cannot be empty.")
+            return
+
+        suggested_filename = "".join(char if char.isalnum() else "_" for char in preset_name).strip("_")
+        if not suggested_filename:
+            suggested_filename = "custom_preset"
+
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Preset",
+            os.path.join(os.getcwd(), f"{suggested_filename}.json"),
+            "JSON Files (*.json)",
+        )
+        if not filepath:
+            return
+
+        description = "Preset exported from modified attributes only."
+        if self.current_player is not None:
+            description = f"Preset exported from modified attributes for {self.current_player.full_name}."
+
+        try:
+            export_custom_preset(
+                filepath,
+                preset_name,
+                self.config,
+                modified,
+                description=description,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Save Preset", f"Failed to save preset:\n{exc}")
+            return
+
+        QMessageBox.information(
+            self,
+            "Save Preset",
+            f"Saved preset '{preset_name}' with {len(modified)} attributes.",
+        )
+
+    def _apply_preset(self) -> None:
+        if self.current_player is None or self.player_mgr is None:
+            QMessageBox.warning(self, "Apply Preset", "Select a player and connect the game first.")
+            return
+
+        modified = self._collect_modified_values()
+        if modified:
+            reply = QMessageBox.question(
+                self,
+                "Apply Preset",
+                "You have unsaved edits in the current player panel.\n\n"
+                "Applying a preset will overwrite those staged values. Continue?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        dialog = PresetChooserDialog(self.config, self)
+        if dialog.exec_() != dialog.Accepted:
+            return
+
+        preset = dialog.selected_preset()
+        if preset is None:
+            return
+
+        values, unresolved = resolve_preset_values(self.config, preset.values_by_description)
+        if not values:
+            QMessageBox.warning(
+                self,
+                "Apply Preset",
+                "The selected preset did not map to any writable attributes for the current offsets.",
+            )
+            return
+
+        results = self.player_mgr.write_all_attributes(self.current_player, values)
+        success = sum(1 for ok in results.values() if ok)
+        failed = sum(1 for ok in results.values() if not ok)
+
+        lines = [
+            f"Applied preset: {preset.name}",
+            f"Successful writes: {success}",
+            f"Failed writes: {failed}",
+        ]
+        if unresolved:
+            lines.append(f"Skipped missing mappings: {len(unresolved)}")
+
+        QMessageBox.information(self, "Apply Preset", "\n".join(lines))
         self.load_player(self.current_player)
 
     def _set_perfect_shot_button_state(self, active: bool) -> None:
         self.btn_perfect_shot.blockSignals(True)
         self.btn_perfect_shot.setChecked(active)
-        self.btn_perfect_shot.setText("Stop Lock Green Beta" if active else "Lock Green Beta")
+        self.btn_perfect_shot.setText("Stop Live Shot Lab" if active else "Live Shot Lab (Exp)")
         self.btn_perfect_shot.blockSignals(False)
 
     def _stop_perfect_shot_timers(self) -> None:
@@ -412,7 +571,7 @@ class AttributeEditorWidget(QWidget):
     def _toggle_perfect_shot_beta(self, checked: bool) -> None:
         if self.player_mgr is None:
             self._set_perfect_shot_button_state(False)
-            QMessageBox.warning(self, "Warning", "Connect the game first.")
+            QMessageBox.warning(self, "Live Shot Lab", "Connect the game first.")
             return
 
         if not checked:
@@ -424,7 +583,7 @@ class AttributeEditorWidget(QWidget):
         target = self._resolve_perfect_shot_target()
         if target is None:
             self._set_perfect_shot_button_state(False)
-            QMessageBox.warning(self, "Lock Green Beta", "Select a player or filter your MyGM team first.")
+            QMessageBox.warning(self, "Live Shot Lab", "Select a player or filter your MyGM team first.")
             return
 
         summary = self.player_mgr.start_perfect_shot_beta_for_team(
@@ -436,7 +595,7 @@ class AttributeEditorWidget(QWidget):
             self._set_perfect_shot_button_state(False)
             QMessageBox.warning(
                 self,
-                "Lock Green Beta",
+                "Live Shot Lab",
                 str(summary.get("error") or "No live in-match shot entry was found."),
             )
             return
@@ -447,7 +606,7 @@ class AttributeEditorWidget(QWidget):
         target_source = str(target.get("source") or "auto")
 
         lines = [
-            "Lock Green Beta is now running for your MyGM team.",
+            "Live Shot Lab is now running for your MyGM team.",
             f"Team: {summary.get('target_team_name') or 'n/a'}",
             f"Target source: {target_source}",
             f"Representative player: {summary.get('representative_player') or 'n/a'}",
@@ -469,9 +628,9 @@ class AttributeEditorWidget(QWidget):
             f"Opponent dampening team: {summary.get('opponent_team_name') or 'not resolved'}",
             f"Opponent roster dampening: {summary.get('opponent_roster_boost_players', 0)} players / {summary.get('opponent_roster_boost_writes', 0)} writes",
             f"Opponent live match dampening: {summary.get('opponent_match_boost_players', 0)} players / {summary.get('opponent_match_boost_entries', 0)} entries / {summary.get('opponent_match_boost_writes', 0)} writes",
-            "All temporary Lock Green boosts are restored when you stop the toggle.",
+            "All temporary live-shot boosts are restored when you stop the toggle.",
         ]
-        QMessageBox.information(self, "Lock Green Beta Enabled", "\n".join(lines))
+        QMessageBox.information(self, "Live Shot Lab Enabled", "\n".join(lines))
 
     def _on_perfect_shot_sustain_tick(self) -> None:
         if self.player_mgr is None:
@@ -496,9 +655,9 @@ class AttributeEditorWidget(QWidget):
             self._set_perfect_shot_button_state(False)
             reason = summary.get("reason")
             if reason:
-                QMessageBox.information(self, "Lock Green Beta Stopped", str(reason))
+                QMessageBox.information(self, "Live Shot Lab Stopped", str(reason))
 
-    def set_player_manager(self, mgr: Optional[PlayerManager]):
+    def set_player_manager(self, mgr: Optional[PlayerManager]) -> None:
         if mgr is None:
             self._stop_perfect_shot_timers()
             self._set_perfect_shot_button_state(False)
