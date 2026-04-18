@@ -1,20 +1,31 @@
-"""球员列表组件 - 可搜索、可筛选的球员表格"""
+"""Player list panel with search and team filtering."""
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QLineEdit, QComboBox, QLabel, QHeaderView, QAbstractItemView
-)
+from __future__ import annotations
+
+from typing import List, Optional
+
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..models.player import Player
-from typing import List, Optional
 
 
 class PlayerListWidget(QWidget):
-    """球员列表组件"""
+    """Display the loaded scope and emit the selected player index."""
 
-    player_selected = pyqtSignal(int)  # 发射球员 index
+    player_selected = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,12 +33,11 @@ class PlayerListWidget(QWidget):
         self._filtered_players: List[Player] = []
         self._setup_ui()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
 
-        # 搜索栏
         search_layout = QHBoxLayout()
         search_layout.setSpacing(8)
 
@@ -37,20 +47,19 @@ class PlayerListWidget(QWidget):
         search_layout.addWidget(self.search_input, 2)
 
         self.team_filter = QComboBox()
-        self.team_filter.addItem("All Teams", -1)
+        self.team_filter.addItem("全部球队", -1)
         self.team_filter.currentIndexChanged.connect(self._apply_filter)
         search_layout.addWidget(self.team_filter, 1)
 
         layout.addLayout(search_layout)
 
-        # 球员数量
         self.count_label = QLabel("共 0 名球员")
+        self.count_label.setObjectName("subtleText")
         layout.addWidget(self.count_label)
 
-        # 球员表格
         self.table = QTableWidget()
         self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["姓名", "球队", "位置", "综评", "年龄", "索引"])
+        self.table.setHorizontalHeaderLabels(["姓名", "球队", "位置", "总评", "年龄", "索引"])
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -65,7 +74,7 @@ class PlayerListWidget(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(5, 50)
+        self.table.setColumnWidth(5, 54)
         self.table.setColumnHidden(5, True)
 
         self.table.cellClicked.connect(self._on_row_clicked)
@@ -73,105 +82,92 @@ class PlayerListWidget(QWidget):
 
         layout.addWidget(self.table)
 
-    def set_players(self, players: List[Player]):
-        """设置球员列表"""
+    def set_players(self, players: List[Player]) -> None:
         self.players = players
         self._rebuild_team_filter()
         self._apply_filter()
 
-    def _rebuild_team_filter(self):
-        """从球员数据动态构建球队筛选下拉"""
+    def _rebuild_team_filter(self) -> None:
         self.team_filter.blockSignals(True)
         current_data = self.team_filter.currentData()
         self.team_filter.clear()
-        self.team_filter.addItem("All Teams", -1)
+        self.team_filter.addItem("全部球队", -1)
 
-        # Collect unique teams from player data
         teams = {}
-        for p in self.players:
-            if p.team_id >= 0 and p.team_name:
-                teams[p.team_id] = p.team_name
+        for player in self.players:
+            if player.team_id >= 0 and player.team_name:
+                teams[player.team_id] = player.team_name
 
-        for tid, name in sorted(teams.items(), key=lambda x: x[1]):
-            self.team_filter.addItem(name, tid)
+        for team_id, team_name in sorted(teams.items(), key=lambda item: item[1]):
+            self.team_filter.addItem(team_name, team_id)
 
-        # Restore previous selection if possible
         if current_data is not None and current_data != -1:
-            idx = self.team_filter.findData(current_data)
-            if idx >= 0:
-                self.team_filter.setCurrentIndex(idx)
+            index = self.team_filter.findData(current_data)
+            if index >= 0:
+                self.team_filter.setCurrentIndex(index)
 
         self.team_filter.blockSignals(False)
 
-    def _apply_filter(self):
-        """应用搜索和球队筛选"""
+    def _apply_filter(self) -> None:
         search_text = self.search_input.text().strip().lower()
         team_id = self.team_filter.currentData()
 
-        filtered = []
-        for p in self.players:
-            if search_text and search_text not in p.full_name.lower():
+        filtered: List[Player] = []
+        for player in self.players:
+            if search_text and search_text not in player.full_name.lower():
                 continue
-            if team_id is not None and team_id != -1 and p.team_id != team_id:
+            if team_id is not None and team_id != -1 and player.team_id != team_id:
                 continue
-            filtered.append(p)
+            filtered.append(player)
 
         self._filtered_players = filtered
         self._update_table()
 
-    def _update_table(self):
-        """更新表格显示"""
+    def _update_table(self) -> None:
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(self._filtered_players))
 
         for row, player in enumerate(self._filtered_players):
             name_item = QTableWidgetItem(player.full_name)
             team_item = QTableWidgetItem(player.team_name)
-            pos_item = QTableWidgetItem(player.position)
-            ovr_item = QTableWidgetItem(str(player.overall))
+            position_item = QTableWidgetItem(player.position)
+            overall_item = QTableWidgetItem(str(player.overall))
             age_item = QTableWidgetItem(str(player.age))
-            idx_item = QTableWidgetItem(str(player.index))
+            index_item = QTableWidgetItem(str(player.index))
 
-            # 综评颜色
-            ovr = player.overall
-            if ovr >= 90:
-                ovr_item.setForeground(QColor("#ff6d00"))
-            elif ovr >= 80:
-                ovr_item.setForeground(QColor("#00e676"))
-            elif ovr >= 70:
-                ovr_item.setForeground(QColor("#29b6f6"))
+            if player.overall >= 90:
+                overall_item.setForeground(QColor("#ff9f1c"))
+            elif player.overall >= 80:
+                overall_item.setForeground(QColor("#4dd0a8"))
+            elif player.overall >= 70:
+                overall_item.setForeground(QColor("#74c0fc"))
 
-            # 居中对齐
-            for item in [pos_item, ovr_item, age_item, idx_item]:
+            for item in (position_item, overall_item, age_item, index_item):
                 item.setTextAlignment(Qt.AlignCenter)
 
-            # 设置 sort data
-            ovr_item.setData(Qt.UserRole, ovr)
+            overall_item.setData(Qt.UserRole, player.overall)
             age_item.setData(Qt.UserRole, player.age)
 
             self.table.setItem(row, 0, name_item)
             self.table.setItem(row, 1, team_item)
-            self.table.setItem(row, 2, pos_item)
-            self.table.setItem(row, 3, ovr_item)
+            self.table.setItem(row, 2, position_item)
+            self.table.setItem(row, 3, overall_item)
             self.table.setItem(row, 4, age_item)
-            self.table.setItem(row, 5, idx_item)
+            self.table.setItem(row, 5, index_item)
 
         self.table.setSortingEnabled(True)
         self.count_label.setText(f"共 {len(self._filtered_players)} 名球员")
 
-    def _on_row_clicked(self, row: int, col: int):
-        """行点击事件 - 使用隐藏的索引列获取球员index（排序安全）"""
-        idx_item = self.table.item(row, 5)
-        if idx_item is None:
+    def _on_row_clicked(self, row: int, _column: int) -> None:
+        index_item = self.table.item(row, 5)
+        if index_item is None:
             return
         try:
-            player_index = int(idx_item.text())
-            self.player_selected.emit(player_index)
-        except (ValueError, TypeError):
-            pass
+            self.player_selected.emit(int(index_item.text()))
+        except (TypeError, ValueError):
+            return
 
     def get_selected_player_index(self) -> Optional[int]:
-        """获取当前选中的球员 index"""
         rows = self.table.selectionModel().selectedRows()
         if not rows:
             return None
@@ -181,13 +177,12 @@ class PlayerListWidget(QWidget):
         return None
 
     def select_player_index(self, player_index: int) -> bool:
-        """Restore a selected player after the table has been rebuilt."""
         for row in range(self.table.rowCount()):
-            idx_item = self.table.item(row, 5)
-            if idx_item is None:
+            index_item = self.table.item(row, 5)
+            if index_item is None:
                 continue
             try:
-                if int(idx_item.text()) != player_index:
+                if int(index_item.text()) != player_index:
                     continue
             except (TypeError, ValueError):
                 continue
@@ -200,5 +195,4 @@ class PlayerListWidget(QWidget):
         return False
 
     def get_filtered_players(self) -> List[Player]:
-        """Expose the current filter scope for tools like batch edit and snapshots."""
         return list(self._filtered_players)

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QGroupBox,
@@ -19,7 +21,16 @@ from PyQt5.QtWidgets import (
 
 from ..core.offsets import OffsetConfig
 from ..models.player import Player, PlayerManager
+from ..preset_packs import (
+    TEAM_PACK_ANALYSIS_MAX_AGE,
+    TEAM_PACK_ANALYSIS_MIN_POTENTIAL,
+    format_preset_pack_plan,
+    plan_preset_pack_application,
+)
 from ..presets import resolve_preset_values
+from ..prospects import analyze_prospect_snapshot
+from ..snapshots import build_snapshot
+from .preset_pack_dialog import PresetPackChooserDialog
 from .preset_dialog import PresetChooserDialog
 
 
@@ -94,6 +105,19 @@ class BatchEditorDialog(QDialog):
         btn_apply_preset.setObjectName("btn_apply")
         btn_apply_preset.clicked.connect(self._batch_apply_preset)
         preset_layout.addWidget(btn_apply_preset)
+
+        pack_info = QLabel(
+            "Preset packs use the current scope plus Prospect Lab heuristics to assign multiple role templates "
+            "in one pass. This is the best fit for rebuild phases, draft classes, and rotation identity passes."
+        )
+        pack_info.setWordWrap(True)
+        pack_info.setStyleSheet("color: #b8b8b8;")
+        preset_layout.addWidget(pack_info)
+
+        btn_apply_pack = QPushButton("Apply Preset Pack...")
+        btn_apply_pack.setObjectName("btn_apply")
+        btn_apply_pack.clicked.connect(self._batch_apply_preset_pack)
+        preset_layout.addWidget(btn_apply_pack)
 
         layout.addWidget(group_presets)
 
@@ -281,6 +305,107 @@ class BatchEditorDialog(QDialog):
         if unresolved:
             label += f"\nSkipped {len(unresolved)} entries that do not exist in the current offsets."
         self._apply_values_to_players(values, label)
+
+    def _build_current_board(self) -> Dict[str, Any]:
+        def progress(index: int, total: int, _player: Player) -> None:
+            self.progress.setMaximum(max(total, 1))
+            self.progress.setValue(index)
+            QApplication.processEvents()
+
+        self.progress.setVisible(True)
+        self.progress.setMaximum(max(len(self.players), 1))
+        self.progress.setValue(0)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            snapshot = build_snapshot(
+                self.config,
+                self.player_mgr,
+                self.players,
+                roster_mode="batch",
+                scope_name=f"Batch Scope ({len(self.players)} players)",
+                progress_callback=progress,
+            )
+            return analyze_prospect_snapshot(
+                snapshot,
+                max_age=TEAM_PACK_ANALYSIS_MAX_AGE,
+                min_potential=TEAM_PACK_ANALYSIS_MIN_POTENTIAL,
+            )
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.progress.setVisible(False)
+
+    def _batch_apply_preset_pack(self) -> None:
+        if not self.players:
+            QMessageBox.warning(self, "Batch Edit", "There are no players in the current scope.")
+            return
+
+        dialog = PresetPackChooserDialog(self.config, self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        pack = dialog.selected_pack()
+        if pack is None:
+            return
+
+        board = self._build_current_board()
+        plan = plan_preset_pack_application(self.config, board, pack)
+        if not plan["assignments"]:
+            summary = format_preset_pack_plan(plan, max_players=6)
+            QMessageBox.information(
+                self,
+                "Preset Pack",
+                summary + "\n\nNo players qualified for the selected pack in the current scope.",
+            )
+            return
+
+        preview = format_preset_pack_plan(plan, max_players=10)
+        reply = QMessageBox.question(
+            self,
+            "Apply Preset Pack",
+            preview + "\n\nApply this preset pack now?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        players_by_index = {int(player.index): player for player in self.players}
+        successful_players = 0
+        total_writes = 0
+        failed_writes = 0
+        missing_players = 0
+
+        self.progress.setVisible(True)
+        self.progress.setMaximum(len(plan["assignments"]))
+        self.progress.setValue(0)
+
+        for index, assignment in enumerate(plan["assignments"], start=1):
+            player = players_by_index.get(int(assignment["index"]))
+            if player is None:
+                missing_players += 1
+                self.progress.setValue(index)
+                continue
+
+            results = self.player_mgr.write_all_attributes(player, assignment["resolved_values"])
+            write_count = sum(1 for ok in results.values() if ok)
+            fail_count = sum(1 for ok in results.values() if not ok)
+            if write_count > 0:
+                successful_players += 1
+            total_writes += write_count
+            failed_writes += fail_count
+            self.progress.setValue(index)
+
+        self.progress.setVisible(False)
+
+        lines = [
+            f"Applied preset pack '{pack.name}'.",
+            f"Players updated: {successful_players}/{len(plan['assignments'])}",
+            f"Successful writes: {total_writes}",
+            f"Failed writes: {failed_writes}",
+        ]
+        if missing_players:
+            lines.append(f"Skipped players missing from the current scope map: {missing_players}")
+
+        QMessageBox.information(self, "Batch Edit Complete", "\n".join(lines))
 
     def _batch_custom(self) -> None:
         attr_name = self.attr_combo.currentData()

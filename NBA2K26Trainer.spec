@@ -7,6 +7,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ('config/offsets_2k26.json', 'config'),
+        ('assets/trainer_icon.ico', 'assets'),
+        ('assets/trainer_icon.png', 'assets'),
     ],
     hiddenimports=['PyQt5.sip'],
     hookspath=[],
@@ -38,4 +40,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     uac_admin=True,
+    icon='assets/trainer_icon.ico',
 )

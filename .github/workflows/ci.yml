@@ -40,11 +40,14 @@ jobs:
       - name: Run prospect trend regression
         run: python -m unittest tests.test_prospects.ProspectTests.test_compare_prospect_snapshots_surfaces_risers_and_fallers -v
 
+      - name: Run preset pack regression
+        run: python -m unittest tests.test_preset_packs.PresetPackTests.test_plan_preset_pack_assigns_players_by_rule_and_honors_limits -v
+
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
       - name: Run import smoke checks
-        run: python -c "import nba2k26_trainer.prospects; import nba2k26_trainer.ui.prospect_dialog; import nba2k26_trainer.ui.main_window"
+        run: python -c "import nba2k26_trainer.preset_packs; import nba2k26_trainer.ui.preset_pack_dialog; import nba2k26_trainer.ui.prospect_dialog; import nba2k26_trainer.ui.main_window"
 
   build:
     needs: test

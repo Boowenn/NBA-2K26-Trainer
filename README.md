@@ -9,24 +9,16 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 
 ---
 
-## What Changed In v3.5.0
+## What Changed In v3.6.0
 
-- Added reusable presets for common roster roles like `Sniper Wing`, `Rim Pressure Slasher`, `Two-Way Stopper`, and `Franchise Prospect`
-- Added preset export from modified attributes only, so you can build your own reusable edits without copying full player records
-- Added preset application to both the single-player editor and the batch editor
-- Added `Snapshot Tools` for exporting the current roster scope and diffing snapshots against each other
-- Added direct `CSV` export for snapshot captures so you can audit or sort roster states in Excel / Sheets
-- Added a clearer in-app comparison summary with added, removed, changed counts plus hot attributes
-- Added output saving for snapshot summaries and diff reports so comparisons can be attached to bug notes or roster reviews
-- Added `Prospect Lab` for ranking the current scope or a saved snapshot by age, potential, boom/bust profile, and development runway
-- Added role-track recommendations that map prospects back to the built-in preset system instead of one-off draft shortcuts
-- Added a one-click growth-plan pass that applies `Franchise Prospect` only to the qualified live prospects on the current board
-- Added prospect trend comparison for `current vs snapshot` and `snapshot vs snapshot` checkpoint reviews
-- Added board-churn reporting so you can see new entries, drop-offs, risers, and fallers across rebuild checkpoints
-- Added trend CSV export so deadline, preseason, and offseason boards can be archived outside the game
-- Removed low-value batch shortcuts such as forcing one birth year for everyone or maxing hot zones with no reuse story
-- Demoted the in-match shot patcher into `Live Shot Lab (Exp)` so the main UI stays focused on stable roster editing
-- Upgraded CI so pushes validate the repo, lock a dedicated prospect trend regression, run import smoke checks for the growing tool surface, build the EXE, publish artifacts, create releases from version tags, and opt into the Node 24 GitHub Actions runtime ahead of the deprecation window
+- Added team-level `Preset Packs` so a filtered scope can be reshaped with one reusable pass instead of one preset at a time
+- Added three built-in pack templates: `Rebuild Identity Pack`, `Draft Class Template Pack`, and `Rotation Identity Pack`
+- Added preset-pack import and export so role-template bundles can be shared as JSON, not rebuilt by hand every session
+- Added Prospect-Lab-backed pack targeting, which means packs can match by role track, growth plan, tier, age, overall, potential, and score
+- Refreshed the main UI with a cleaner dashboard layout, grouped actions, Chinese-friendly labels, and better visual hierarchy
+- Replaced the default Python window icon with a custom trainer icon and embedded it into the packaged EXE
+- Cleaned up the player list presentation so search, counts, and table headers read like a finished tool instead of a raw PyQt shell
+- Extended CI with a dedicated preset-pack regression and broader import smoke coverage for the new UI surface
 
 ---
 
@@ -42,6 +34,8 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - Built-in role presets for common archetypes
 - Export custom presets from the attributes you actually changed
 - Reapply presets to a single player or to an entire filtered team
+- Apply built-in or imported `Preset Packs` across a filtered team, draft class, or rebuild scope
+- Import/export team template bundles as JSON so role passes are reusable across saves
 - Batch tools for maxing core ratings, stamina, potential, badges, or running full God Mode
 - Prospect ranking and development planning for filtered teams, draft classes, or snapshot files
 - Prospect trend tracking across preseason, deadline, and offseason checkpoints
@@ -114,7 +108,7 @@ Do not use this in online modes.
 4. Click `Apply Changes` for direct edits
 5. Use `Save Preset` to export only the staged changes you made
 6. Use `Apply Preset...` to reuse a built-in or imported preset
-7. Use `Batch Edit` for team-wide actions in the current filter scope
+7. Use `Batch Edit` for team-wide actions in the current filter scope, including reusable `Preset Packs`
 8. Open `Snapshots` to export the current filter scope as JSON or CSV, compare roster captures, and save a text report
 9. Open `Prospect Lab` to rank a rebuild target list, compare checkpoint trends, export CSVs, or push the `Franchise Prospect` growth plan to qualified prospects
 
@@ -125,18 +119,22 @@ Do not use this in online modes.
 ```text
 NBA-2K26-Trainer/
 |-- .github/workflows/ci.yml
+|-- assets/
 |-- config/
 |   `-- offsets_2k26.json
 |-- nba2k26_trainer/
 |   |-- core/
 |   |-- models/
 |   |-- ui/
+|   |-- preset_packs.py
 |   |-- presets.py
 |   |-- prospects.py
+|   |-- resources.py
 |   `-- __init__.py
 |-- tests/
 |-- main.py
 |-- NBA2K26Trainer.spec
+|-- tools/
 `-- requirements.txt
 ```
 
@@ -144,13 +142,14 @@ NBA-2K26-Trainer/
 
 ## Release Engineering
 
-The CI pipeline now does five things:
+The CI pipeline now does six things:
 
-1. Runs the roster regression and prospect trend regression tests
+1. Runs the roster regression, prospect trend regression, and preset-pack regression tests
 2. Runs the full unit test suite plus import smoke checks
 3. Builds the Windows executable with PyInstaller
 4. Uploads the packaged EXE as a workflow artifact
 5. Creates or updates a GitHub release automatically when a `v*` tag is pushed
+6. Ships the packaged app with the embedded custom trainer icon
 
 That keeps releases tied to tested commits instead of manual local packaging only.
 
@@ -161,9 +160,9 @@ That keeps releases tied to tested commits instead of manual local packaging onl
 These are the next extensions that fit the current product direction best:
 
 - A safer transaction layer for contracts and cap-sheet editing
-- Optional import/export for team-level preset packs and role templates
 - Team or season rollup reports generated from snapshot comparisons
-- Shared team preset packs for draft classes, rebuild phases, and role-template imports
+- Multi-checkpoint prospect timelines instead of only two-way trend compares
+- Contract edit guardrails for cap, years, and salary-step validation
 
 ---
 
