@@ -9,7 +9,7 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 
 ---
 
-## What Changed In v3.3.0
+## What Changed In v3.4.0
 
 - Added reusable presets for common roster roles like `Sniper Wing`, `Rim Pressure Slasher`, `Two-Way Stopper`, and `Franchise Prospect`
 - Added preset export from modified attributes only, so you can build your own reusable edits without copying full player records
@@ -18,9 +18,12 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - Added direct `CSV` export for snapshot captures so you can audit or sort roster states in Excel / Sheets
 - Added a clearer in-app comparison summary with added, removed, changed counts plus hot attributes
 - Added output saving for snapshot summaries and diff reports so comparisons can be attached to bug notes or roster reviews
+- Added `Prospect Lab` for ranking the current scope or a saved snapshot by age, potential, boom/bust profile, and development runway
+- Added role-track recommendations that map prospects back to the built-in preset system instead of one-off draft shortcuts
+- Added a one-click growth-plan pass that applies `Franchise Prospect` only to the qualified live prospects on the current board
 - Removed low-value batch shortcuts such as forcing one birth year for everyone or maxing hot zones with no reuse story
 - Demoted the in-match shot patcher into `Live Shot Lab (Exp)` so the main UI stays focused on stable roster editing
-- Upgraded CI so pushes validate the repo, build the EXE, publish artifacts, create releases from version tags, and opt into the Node 24 GitHub Actions runtime ahead of the deprecation window
+- Upgraded CI so pushes validate the repo, run import smoke checks for the growing tool surface, build the EXE, publish artifacts, create releases from version tags, and opt into the Node 24 GitHub Actions runtime ahead of the deprecation window
 
 ---
 
@@ -37,6 +40,7 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - Export custom presets from the attributes you actually changed
 - Reapply presets to a single player or to an entire filtered team
 - Batch tools for maxing core ratings, stamina, potential, badges, or running full God Mode
+- Prospect ranking and development planning for filtered teams, draft classes, or snapshot files
 
 ### Scan And Sync Quality
 - Dynamic player-table scanning when roster pointers drift
@@ -44,6 +48,7 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - Automatic live-roster resync when the save swaps to a different roster table
 - In-match compact-copy syncing for edits that need to survive into active gameplay
 - Snapshot export and diff for roster regression checks, patch comparisons, save-file validation, and spreadsheet review
+- Prospect boards generated from either the live roster scope or saved snapshot files
 
 ### Experimental Live Tools
 - `Live Shot Lab (Exp)` keeps temporary in-match shot tuning available
@@ -106,6 +111,7 @@ Do not use this in online modes.
 6. Use `Apply Preset...` to reuse a built-in or imported preset
 7. Use `Batch Edit` for team-wide actions in the current filter scope
 8. Open `Snapshots` to export the current filter scope as JSON or CSV, compare roster captures, and save a text report
+9. Open `Prospect Lab` to rank a rebuild target list, export a board CSV, or push the `Franchise Prospect` growth plan to qualified prospects
 
 ---
 
@@ -121,6 +127,7 @@ NBA-2K26-Trainer/
 |   |-- models/
 |   |-- ui/
 |   |-- presets.py
+|   |-- prospects.py
 |   `-- __init__.py
 |-- tests/
 |-- main.py
@@ -147,10 +154,10 @@ That keeps releases tied to tested commits instead of manual local packaging onl
 
 These are the next extensions that fit the current product direction best:
 
-- Draft-class and prospect tools built on top of the preset and snapshot systems
 - A safer transaction layer for contracts and cap-sheet editing
 - Optional import/export for team-level preset packs and role templates
 - Team or season rollup reports generated from snapshot comparisons
+- Prospect comparisons against preseason, deadline, and offseason snapshot checkpoints
 
 ---
 

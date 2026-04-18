@@ -40,6 +40,9 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
+      - name: Run import smoke checks
+        run: python -c "import nba2k26_trainer.prospects; import nba2k26_trainer.ui.prospect_dialog; import nba2k26_trainer.ui.main_window"
+
   build:
     needs: test
     runs-on: windows-latest

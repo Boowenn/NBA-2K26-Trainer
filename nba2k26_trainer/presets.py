@@ -139,6 +139,13 @@ def builtin_presets() -> List[PresetDefinition]:
     return list(BUILTIN_PRESETS)
 
 
+def get_builtin_preset(preset_id: str) -> PresetDefinition | None:
+    for preset in BUILTIN_PRESETS:
+        if preset.preset_id == preset_id:
+            return preset
+    return None
+
+
 def _find_attr_for_key(config: OffsetConfig, key: str):
     return config.find_attribute_by_description(key) or config.get_attribute(key)
 
