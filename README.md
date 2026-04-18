@@ -9,7 +9,7 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 
 ---
 
-## What Changed In v3.4.0
+## What Changed In v3.5.0
 
 - Added reusable presets for common roster roles like `Sniper Wing`, `Rim Pressure Slasher`, `Two-Way Stopper`, and `Franchise Prospect`
 - Added preset export from modified attributes only, so you can build your own reusable edits without copying full player records
@@ -21,9 +21,12 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - Added `Prospect Lab` for ranking the current scope or a saved snapshot by age, potential, boom/bust profile, and development runway
 - Added role-track recommendations that map prospects back to the built-in preset system instead of one-off draft shortcuts
 - Added a one-click growth-plan pass that applies `Franchise Prospect` only to the qualified live prospects on the current board
+- Added prospect trend comparison for `current vs snapshot` and `snapshot vs snapshot` checkpoint reviews
+- Added board-churn reporting so you can see new entries, drop-offs, risers, and fallers across rebuild checkpoints
+- Added trend CSV export so deadline, preseason, and offseason boards can be archived outside the game
 - Removed low-value batch shortcuts such as forcing one birth year for everyone or maxing hot zones with no reuse story
 - Demoted the in-match shot patcher into `Live Shot Lab (Exp)` so the main UI stays focused on stable roster editing
-- Upgraded CI so pushes validate the repo, run import smoke checks for the growing tool surface, build the EXE, publish artifacts, create releases from version tags, and opt into the Node 24 GitHub Actions runtime ahead of the deprecation window
+- Upgraded CI so pushes validate the repo, lock a dedicated prospect trend regression, run import smoke checks for the growing tool surface, build the EXE, publish artifacts, create releases from version tags, and opt into the Node 24 GitHub Actions runtime ahead of the deprecation window
 
 ---
 
@@ -41,6 +44,7 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - Reapply presets to a single player or to an entire filtered team
 - Batch tools for maxing core ratings, stamina, potential, badges, or running full God Mode
 - Prospect ranking and development planning for filtered teams, draft classes, or snapshot files
+- Prospect trend tracking across preseason, deadline, and offseason checkpoints
 
 ### Scan And Sync Quality
 - Dynamic player-table scanning when roster pointers drift
@@ -49,6 +53,7 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - In-match compact-copy syncing for edits that need to survive into active gameplay
 - Snapshot export and diff for roster regression checks, patch comparisons, save-file validation, and spreadsheet review
 - Prospect boards generated from either the live roster scope or saved snapshot files
+- Prospect trend reports generated from two saved checkpoints or from the current scope against a baseline snapshot
 
 ### Experimental Live Tools
 - `Live Shot Lab (Exp)` keeps temporary in-match shot tuning available
@@ -111,7 +116,7 @@ Do not use this in online modes.
 6. Use `Apply Preset...` to reuse a built-in or imported preset
 7. Use `Batch Edit` for team-wide actions in the current filter scope
 8. Open `Snapshots` to export the current filter scope as JSON or CSV, compare roster captures, and save a text report
-9. Open `Prospect Lab` to rank a rebuild target list, export a board CSV, or push the `Franchise Prospect` growth plan to qualified prospects
+9. Open `Prospect Lab` to rank a rebuild target list, compare checkpoint trends, export CSVs, or push the `Franchise Prospect` growth plan to qualified prospects
 
 ---
 
@@ -139,12 +144,13 @@ NBA-2K26-Trainer/
 
 ## Release Engineering
 
-The CI pipeline now does four things:
+The CI pipeline now does five things:
 
-1. Runs the roster regression test plus the full test suite
-2. Builds the Windows executable with PyInstaller
-3. Uploads the packaged EXE as a workflow artifact
-4. Creates or updates a GitHub release automatically when a `v*` tag is pushed
+1. Runs the roster regression and prospect trend regression tests
+2. Runs the full unit test suite plus import smoke checks
+3. Builds the Windows executable with PyInstaller
+4. Uploads the packaged EXE as a workflow artifact
+5. Creates or updates a GitHub release automatically when a `v*` tag is pushed
 
 That keeps releases tied to tested commits instead of manual local packaging only.
 
@@ -157,7 +163,7 @@ These are the next extensions that fit the current product direction best:
 - A safer transaction layer for contracts and cap-sheet editing
 - Optional import/export for team-level preset packs and role templates
 - Team or season rollup reports generated from snapshot comparisons
-- Prospect comparisons against preseason, deadline, and offseason snapshot checkpoints
+- Shared team preset packs for draft classes, rebuild phases, and role-template imports
 
 ---
 

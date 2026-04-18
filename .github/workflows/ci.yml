@@ -37,6 +37,9 @@ jobs:
       - name: Run MyGM roster slot regression
         run: python -m unittest tests.test_player_table_scoring.PlayerTableScoringTests.test_team_slot_assignment_map_overrides_save_roster_memberships -v
 
+      - name: Run prospect trend regression
+        run: python -m unittest tests.test_prospects.ProspectTests.test_compare_prospect_snapshots_surfaces_risers_and_fallers -v
+
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
