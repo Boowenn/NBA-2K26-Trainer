@@ -17,6 +17,7 @@ from .. import __version__
 from .player_list import PlayerListWidget
 from .attribute_editor import AttributeEditorWidget
 from .batch_editor import BatchEditorDialog
+from .snapshot_dialog import SnapshotToolsDialog
 from .theme import DARK_STYLE
 
 from typing import Optional
@@ -114,6 +115,11 @@ class MainWindow(QMainWindow):
         self.btn_batch.clicked.connect(self._open_batch_editor)
         self.btn_batch.setEnabled(False)
         toolbar.addWidget(self.btn_batch)
+
+        self.btn_snapshots = QPushButton("Snapshots")
+        self.btn_snapshots.setObjectName("btn_max")
+        self.btn_snapshots.clicked.connect(self._open_snapshot_tools)
+        toolbar.addWidget(self.btn_snapshots)
 
         self.btn_load_offsets = QPushButton("Load Offsets")
         self.btn_load_offsets.clicked.connect(self._load_custom_offsets)
@@ -432,6 +438,29 @@ class MainWindow(QMainWindow):
         dialog = BatchEditorDialog(self.config, self.player_mgr, batch_players, self)
         dialog.exec_()
         self._refresh_players(force_rescan=True)
+
+    def _open_snapshot_tools(self):
+        scope_players = self.player_list.get_filtered_players() if hasattr(self.player_list, "get_filtered_players") else list(self.players)
+        search_text = self.player_list.search_input.text().strip() if hasattr(self.player_list, "search_input") else ""
+        team_id = self.player_list.team_filter.currentData() if hasattr(self.player_list, "team_filter") else -1
+        scope_parts = []
+        if team_id is not None and team_id != -1:
+            scope_parts.append(f"Team: {self.player_list.team_filter.currentText()}")
+        else:
+            scope_parts.append("All Loaded Players")
+        if search_text:
+            scope_parts.append(f"Search: {search_text}")
+        scope_name = " | ".join(scope_parts)
+
+        dialog = SnapshotToolsDialog(
+            self.config,
+            self.player_mgr,
+            scope_players,
+            roster_mode=self.roster_mode,
+            scope_name=scope_name,
+            parent=self,
+        )
+        dialog.exec_()
 
     def _load_custom_offsets(self):
         filepath, _ = QFileDialog.getOpenFileName(

@@ -198,3 +198,7 @@ class PlayerListWidget(QWidget):
                 self.table.scrollToItem(name_item, QAbstractItemView.PositionAtCenter)
             return True
         return False
+
+    def get_filtered_players(self) -> List[Player]:
+        """Expose the current filter scope for tools like batch edit and snapshots."""
+        return list(self._filtered_players)
