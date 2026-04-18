@@ -1,8 +1,15 @@
+import csv
+import tempfile
 import unittest
 
 from nba2k26_trainer.core.offsets import AttributeDef, OffsetConfig
 from nba2k26_trainer.models.player import Player
-from nba2k26_trainer.snapshots import build_snapshot, diff_snapshots, format_diff_report
+from nba2k26_trainer.snapshots import (
+    build_snapshot,
+    diff_snapshots,
+    format_diff_report,
+    save_snapshot_csv,
+)
 
 
 class FakePlayerManager:
@@ -20,11 +27,11 @@ class SnapshotTests(unittest.TestCase):
             game_version="1.0",
             attributes={
                 "Scoring": [
-                    AttributeDef(name="三分球", offset=0, category="Scoring", description="Three-Point Shot"),
-                    AttributeDef(name="投篮智商", offset=1, category="Scoring", description="Shot IQ"),
+                    AttributeDef(name="three_point_shot", offset=0, category="Scoring", description="Three-Point Shot"),
+                    AttributeDef(name="shot_iq", offset=1, category="Scoring", description="Shot IQ"),
                 ],
                 "Defense": [
-                    AttributeDef(name="抢断", offset=2, category="Defense", description="Steal"),
+                    AttributeDef(name="steal", offset=2, category="Defense", description="Steal"),
                 ],
             },
         )
@@ -45,9 +52,9 @@ class SnapshotTests(unittest.TestCase):
         manager = FakePlayerManager(
             {
                 0: {
-                    "三分球": 99,
-                    "投篮智商": 97,
-                    "抢断": 78,
+                    "three_point_shot": 99,
+                    "shot_iq": 97,
+                    "steal": 78,
                 }
             }
         )
@@ -65,6 +72,43 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["players"][0]["attributes"]["Three-Point Shot"], 99)
         self.assertEqual(snapshot["players"][0]["attributes"]["Shot IQ"], 97)
         self.assertEqual(snapshot["players"][0]["attributes"]["Steal"], 78)
+
+    def test_save_snapshot_csv_writes_flat_player_rows(self):
+        snapshot = {
+            "players": [
+                {
+                    "player_key": "stephen curry|1988|pg",
+                    "full_name": "Stephen Curry",
+                    "first_name": "Stephen",
+                    "last_name": "Curry",
+                    "team_name": "GSW Warriors",
+                    "team_id": 9,
+                    "position": "PG",
+                    "overall": 97,
+                    "age": 38,
+                    "birth_year": 1988,
+                    "attributes": {
+                        "Shot IQ": 97,
+                        "Three-Point Shot": 99,
+                    },
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = f"{temp_dir}\\snapshot.csv"
+            save_snapshot_csv(filepath, snapshot)
+
+            with open(filepath, "r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = list(reader)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["player_key"], "stephen curry|1988|pg")
+        self.assertEqual(rows[0]["full_name"], "Stephen Curry")
+        self.assertEqual(rows[0]["team_name"], "GSW Warriors")
+        self.assertEqual(rows[0]["Three-Point Shot"], "99")
+        self.assertEqual(rows[0]["Shot IQ"], "97")
 
     def test_diff_snapshots_detects_added_removed_and_changed(self):
         left_snapshot = {
@@ -148,6 +192,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("Added players:   1", report)
         self.assertIn("Removed players: 1", report)
         self.assertIn("Changed players: 1", report)
+        self.assertIn("Change Leaders", report)
         self.assertIn("Luka Doncic", report)
 
 

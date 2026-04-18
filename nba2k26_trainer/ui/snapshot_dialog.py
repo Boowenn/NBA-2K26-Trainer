@@ -29,6 +29,7 @@ from ..snapshots import (
     format_snapshot_summary,
     load_snapshot,
     save_snapshot,
+    save_snapshot_csv,
 )
 
 
@@ -62,7 +63,7 @@ class SnapshotToolsDialog(QDialog):
         layout.setSpacing(12)
 
         intro = QLabel(
-            "Export the current roster scope as a JSON snapshot, compare the live roster to a saved snapshot, "
+            "Export the current roster scope as JSON or CSV, compare the live roster to a saved snapshot, "
             "or diff any two snapshot files."
         )
         intro.setWordWrap(True)
@@ -90,8 +91,29 @@ class SnapshotToolsDialog(QDialog):
         self.btn_compare_files.clicked.connect(self._compare_two_snapshot_files)
         button_row.addWidget(self.btn_compare_files)
 
+        self.btn_save_output = QPushButton("Save Output...")
+        self.btn_save_output.clicked.connect(self._save_output)
+        button_row.addWidget(self.btn_save_output)
+
         button_row.addStretch()
         layout.addLayout(button_row)
+
+        summary_group = QGroupBox("Comparison Summary")
+        summary_layout = QVBoxLayout(summary_group)
+        counts_row = QHBoxLayout()
+        self.added_label = QLabel("Added: -")
+        self.removed_label = QLabel("Removed: -")
+        self.changed_label = QLabel("Changed: -")
+        counts_row.addWidget(self.added_label)
+        counts_row.addWidget(self.removed_label)
+        counts_row.addWidget(self.changed_label)
+        counts_row.addStretch()
+        summary_layout.addLayout(counts_row)
+
+        self.top_attributes_label = QLabel("Top changed attributes: n/a")
+        self.top_attributes_label.setWordWrap(True)
+        summary_layout.addWidget(self.top_attributes_label)
+        layout.addWidget(summary_group)
 
         self.status_label = QLabel("Ready.")
         self.status_label.setStyleSheet("color: #b8b8b8;")
@@ -109,6 +131,8 @@ class SnapshotToolsDialog(QDialog):
         live_available = self.player_mgr is not None and player_count > 0
         self.btn_export.setEnabled(live_available)
         self.btn_compare_current.setEnabled(live_available)
+        self.btn_save_output.setEnabled(False)
+        self._clear_diff_summary()
         if not live_available:
             self.status_label.setText("Connect the game and load players to export or compare the live roster.")
 
@@ -131,6 +155,31 @@ class SnapshotToolsDialog(QDialog):
             QApplication.restoreOverrideCursor()
         return snapshot
 
+    def _clear_diff_summary(self) -> None:
+        self.added_label.setText("Added: -")
+        self.removed_label.setText("Removed: -")
+        self.changed_label.setText("Changed: -")
+        self.top_attributes_label.setText("Top changed attributes: n/a")
+
+    def _set_output_text(self, text: str) -> None:
+        self.report_output.setPlainText(text)
+        self.btn_save_output.setEnabled(bool(text.strip()))
+
+    def _apply_diff_result(self, diff_result, status_text: str) -> None:
+        self.added_label.setText(f"Added: {len(diff_result['added'])}")
+        self.removed_label.setText(f"Removed: {len(diff_result['removed'])}")
+        self.changed_label.setText(f"Changed: {len(diff_result['changed'])}")
+
+        attribute_change_counts = list(diff_result.get("attribute_change_counts", {}).items())[:5]
+        if attribute_change_counts:
+            top_text = ", ".join(f"{name} ({count})" for name, count in attribute_change_counts)
+            self.top_attributes_label.setText(f"Top changed attributes: {top_text}")
+        else:
+            self.top_attributes_label.setText("Top changed attributes: none")
+
+        self._set_output_text(format_diff_report(diff_result))
+        self.status_label.setText(status_text)
+
     def _export_current_snapshot(self) -> None:
         if self.player_mgr is None or not self.players:
             QMessageBox.warning(self, "Snapshot Tools", "Connect the game and load players first.")
@@ -138,19 +187,29 @@ class SnapshotToolsDialog(QDialog):
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         suggested = os.path.join(os.getcwd(), f"nba2k26_snapshot_{timestamp}.json")
-        filepath, _ = QFileDialog.getSaveFileName(
+        filepath, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Save Snapshot",
             suggested,
-            "JSON Files (*.json)",
+            "Snapshot Files (*.json *.csv);;JSON Files (*.json);;CSV Files (*.csv)",
         )
         if not filepath:
             return
 
         snapshot = self._busy_build_current_snapshot()
-        save_snapshot(filepath, snapshot)
+        extension = os.path.splitext(filepath)[1].lower()
+        if not extension:
+            extension = ".csv" if "CSV" in selected_filter else ".json"
+            filepath = f"{filepath}{extension}"
+
+        if extension == ".csv":
+            save_snapshot_csv(filepath, snapshot)
+        else:
+            save_snapshot(filepath, snapshot)
+
+        self._clear_diff_summary()
         self.status_label.setText(f"Snapshot saved to {filepath}")
-        self.report_output.setPlainText(format_snapshot_summary(snapshot))
+        self._set_output_text(format_snapshot_summary(snapshot))
 
     def _compare_current_vs_snapshot(self) -> None:
         if self.player_mgr is None or not self.players:
@@ -169,8 +228,7 @@ class SnapshotToolsDialog(QDialog):
         current_snapshot = self._busy_build_current_snapshot()
         loaded_snapshot = load_snapshot(filepath)
         diff_result = diff_snapshots(loaded_snapshot, current_snapshot)
-        self.report_output.setPlainText(format_diff_report(diff_result))
-        self.status_label.setText(f"Compared current scope against {os.path.basename(filepath)}")
+        self._apply_diff_result(diff_result, f"Compared current scope against {os.path.basename(filepath)}")
 
     def _compare_two_snapshot_files(self) -> None:
         left_path, _ = QFileDialog.getOpenFileName(
@@ -194,7 +252,33 @@ class SnapshotToolsDialog(QDialog):
         left_snapshot = load_snapshot(left_path)
         right_snapshot = load_snapshot(right_path)
         diff_result = diff_snapshots(left_snapshot, right_snapshot)
-        self.report_output.setPlainText(format_diff_report(diff_result))
-        self.status_label.setText(
-            f"Compared {os.path.basename(left_path)} vs {os.path.basename(right_path)}"
+        self._apply_diff_result(
+            diff_result,
+            f"Compared {os.path.basename(left_path)} vs {os.path.basename(right_path)}",
         )
+
+    def _save_output(self) -> None:
+        text = self.report_output.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, "Snapshot Tools", "There is no output to save yet.")
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suggested = os.path.join(os.getcwd(), f"nba2k26_snapshot_report_{timestamp}.txt")
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Output",
+            suggested,
+            "Text Files (*.txt);;Markdown Files (*.md)",
+        )
+        if not filepath:
+            return
+
+        if not os.path.splitext(filepath)[1]:
+            filepath = f"{filepath}.txt"
+
+        with open(filepath, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.write("\n")
+
+        self.status_label.setText(f"Saved output to {filepath}")

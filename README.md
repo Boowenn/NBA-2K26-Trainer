@@ -9,15 +9,18 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 
 ---
 
-## What Changed In v3.2.0
+## What Changed In v3.3.0
 
 - Added reusable presets for common roster roles like `Sniper Wing`, `Rim Pressure Slasher`, `Two-Way Stopper`, and `Franchise Prospect`
 - Added preset export from modified attributes only, so you can build your own reusable edits without copying full player records
 - Added preset application to both the single-player editor and the batch editor
 - Added `Snapshot Tools` for exporting the current roster scope and diffing snapshots against each other
+- Added direct `CSV` export for snapshot captures so you can audit or sort roster states in Excel / Sheets
+- Added a clearer in-app comparison summary with added, removed, changed counts plus hot attributes
+- Added output saving for snapshot summaries and diff reports so comparisons can be attached to bug notes or roster reviews
 - Removed low-value batch shortcuts such as forcing one birth year for everyone or maxing hot zones with no reuse story
 - Demoted the in-match shot patcher into `Live Shot Lab (Exp)` so the main UI stays focused on stable roster editing
-- Upgraded CI so pushes validate the repo, build the EXE, publish artifacts, and create releases from version tags
+- Upgraded CI so pushes validate the repo, build the EXE, publish artifacts, create releases from version tags, and opt into the Node 24 GitHub Actions runtime ahead of the deprecation window
 
 ---
 
@@ -40,7 +43,7 @@ A real-time player editor for NBA 2K26 MyNBA / MyGM saves. Edit ratings, badges,
 - Current-roster vs. legend-roster selection mode
 - Automatic live-roster resync when the save swaps to a different roster table
 - In-match compact-copy syncing for edits that need to survive into active gameplay
-- Snapshot export and diff for roster regression checks, patch comparisons, and save-file validation
+- Snapshot export and diff for roster regression checks, patch comparisons, save-file validation, and spreadsheet review
 
 ### Experimental Live Tools
 - `Live Shot Lab (Exp)` keeps temporary in-match shot tuning available
@@ -102,7 +105,7 @@ Do not use this in online modes.
 5. Use `Save Preset` to export only the staged changes you made
 6. Use `Apply Preset...` to reuse a built-in or imported preset
 7. Use `Batch Edit` for team-wide actions in the current filter scope
-8. Open `Snapshots` to export the current filter scope or compare two roster captures
+8. Open `Snapshots` to export the current filter scope as JSON or CSV, compare roster captures, and save a text report
 
 ---
 
@@ -144,10 +147,10 @@ That keeps releases tied to tested commits instead of manual local packaging onl
 
 These are the next extensions that fit the current product direction best:
 
-- Draft-class and prospect tools built on top of the new preset system
+- Draft-class and prospect tools built on top of the preset and snapshot systems
 - A safer transaction layer for contracts and cap-sheet editing
 - Optional import/export for team-level preset packs and role templates
-- CSV export and richer visual diff summaries on top of the new snapshot workflow
+- Team or season rollup reports generated from snapshot comparisons
 
 ---
 

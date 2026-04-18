@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from collections import Counter
 from datetime import datetime, timezone
@@ -114,6 +115,40 @@ def save_snapshot(filepath: str, snapshot: Dict[str, Any]) -> None:
     with open(filepath, "w", encoding="utf-8") as handle:
         json.dump(snapshot, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
+
+
+def save_snapshot_csv(filepath: str, snapshot: Dict[str, Any]) -> None:
+    players = list(snapshot.get("players", []))
+    attribute_names = sorted(
+        {
+            str(attr_name)
+            for player in players
+            for attr_name in (player.get("attributes", {}) or {}).keys()
+        }
+    )
+    fieldnames = [
+        "player_key",
+        "full_name",
+        "first_name",
+        "last_name",
+        "team_name",
+        "team_id",
+        "position",
+        "overall",
+        "age",
+        "birth_year",
+        *attribute_names,
+    ]
+
+    with open(filepath, "w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for player in players:
+            row = {field: player.get(field, "") for field in fieldnames[:10]}
+            row["player_key"] = player.get("player_key") or _player_identity_key(player)
+            for attr_name in attribute_names:
+                row[attr_name] = (player.get("attributes", {}) or {}).get(attr_name, "")
+            writer.writerow(row)
 
 
 def load_snapshot(filepath: str) -> Dict[str, Any]:
@@ -230,6 +265,13 @@ def format_diff_report(diff_result: Dict[str, Any], *, max_players: int = 12, ma
         lines.extend(["", f"Top changed attributes: {attr_text}"])
 
     if changed:
+        lines.extend(["", "Change Leaders"])
+        for player_change in changed[: min(5, max_players)]:
+            player = player_change["right_player"]
+            lines.append(
+                f"- {_format_player_label(player)}: {player_change['change_count']} field changes"
+            )
+
         lines.extend(["", "Changed Players"])
         for player_change in changed[:max_players]:
             left_player = player_change["left_player"]
